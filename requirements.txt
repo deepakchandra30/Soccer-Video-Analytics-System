@@ -1,0 +1,42 @@
+# Core deep learning
+torch
+torchvision==0.17.0
+torchaudio==2.2.0
+
+# SoccerNet data access and evaluation
+SoccerNet==0.1.62
+
+# Numerical and data processing
+h5py==3.10.0
+numpy==1.26.4
+pandas==2.2.0
+
+# Video processing
+opencv-python-headless==4.9.0.80
+decord==0.6.0
+
+# Player tracking
+ultralytics==8.4.22
+supervision==0.27.0
+motmetrics==1.4.0
+lap==0.5.12
+
+# Training utilities
+tqdm==4.66.2
+wandb==0.17.0
+matplotlib==3.8.3
+einops==0.7.0
+
+# API
+fastapi==0.135.1
+uvicorn==0.41.0
+httpx==0.28.1
+
+# LLM narratives
+openai==2.28.0
+nltk==3.9.3
+pydantic==2.12.5
+
+# Testing
+pytest==8.0.2
+pytest-cov==4.1.0

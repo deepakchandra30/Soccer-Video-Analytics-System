@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+env/
+.venv/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+weights/
+
+# Data — large files excluded from version control
+data/raw/
+data/features/
+data/*.npy
+data/**/*.npy
+
+# Labels and processed data
+data/processed/
+
+# Video files
+*.mp4
+*.avi
+*.mkv
+
+# Node/React
+node_modules/
+.next/
+.env
+.env.local
+
+# Planning
+.planning/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Screenshots and local files
+*.png
+*.pdf
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+runs/
+wandb/
+experiments/*.log
+
+
+# Misc
+dashboard/
+docs/
+tests/
+.pytest_cache/
