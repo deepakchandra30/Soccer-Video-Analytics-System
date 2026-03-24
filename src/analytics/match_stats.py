@@ -9,29 +9,11 @@ from src.analytics.attribution import attribute_events_to_players, compute_event
 
 
 def compute_match_analytics(events, tracks, fps=25):
-    """Compute full match analytics from events and tracks.
-
-    Args:
-        events: list of event prediction dicts
-        tracks: list of frame records from TrackingPipeline
-        fps: video frame rate
-
-    Returns dict with:
-        - player_stats: per-player screen-time and positions
-        - event_involvement: per-player event counts
-        - attributed_events: events with player attribution
-        - heatmap_shape: tuple for the heatmap dimensions
-    """
-    # per-player stats from tracks
+    """Compute full match analytics from events and tracks."""
     player_stats = compute_player_stats(tracks, fps=fps)
-
-    # attribute events to players
     attributed = attribute_events_to_players(events, tracks)
-
-    # event involvement counts
     involvement = compute_event_involvement(attributed)
 
-    # merge involvement into player stats
     for tid, inv in involvement.items():
         if tid in player_stats:
             player_stats[tid]["event_involvement"] = inv
@@ -45,7 +27,6 @@ def compute_match_analytics(events, tracks, fps=25):
                 "event_involvement": inv,
             }
 
-    # team heatmap
     heatmap = compute_heatmap(tracks)
 
     return {
@@ -63,8 +44,6 @@ def compute_match_analytics(events, tracks, fps=25):
 def save_match_analytics(analytics, output_path):
     """Save analytics to JSON."""
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-
-    # make serializable
     serializable = {
         "player_stats": {str(k): v for k, v in analytics["player_stats"].items()},
         "attributed_events": analytics["attributed_events"],

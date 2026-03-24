@@ -10,11 +10,7 @@ from src.realtime.processor import RealtimeProcessor
 
 
 class RealtimeSession:
-    """Manages a real-time processing session for a single match.
-
-    Wraps a RealtimeProcessor and maintains running statistics across
-    all processed frames without re-scanning cached results.
-    """
+    """Processing session for a single match video."""
 
     def __init__(self, match_id: str, video_path: str, device: Optional[str] = None):
         self._match_id = match_id
@@ -27,12 +23,8 @@ class RealtimeSession:
         self._total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
 
-        # Lock protecting the mutable stat counters below.  _update_stats can
-        # be called from multiple threads (e.g. WebSocket handler running in
-        # an executor), so every read/write of the counters goes through this.
         self._stats_lock = threading.Lock()
 
-        # Running aggregate counters (avoid re-scanning all cached frames).
         self._frames_processed: int = 0
         self._total_players_detected: int = 0
         self._total_confidence_sum: float = 0.0
@@ -41,37 +33,24 @@ class RealtimeSession:
         self._unique_track_ids: set = set()
         self._total_processing_time: float = 0.0
 
-        # Per-player screen time: track_id -> number of frames seen.
         self._player_frame_counts: Dict[int, int] = {}
 
     @property
     def match_id(self) -> str:
-        """Return the match identifier for this session."""
         return self._match_id
 
     @property
     def processor(self) -> RealtimeProcessor:
-        """Return the underlying processor."""
+        return self._processor
         return self._processor
 
     def process_at_time(self, timestamp_ms: int) -> dict:
-        """Process the frame at a given timestamp in milliseconds.
-
-        Converts the timestamp to a frame index based on the video fps,
-        clamps it to the valid range, then delegates to process_at_frame.
-        """
+        """Process frame at the given millisecond timestamp."""
         frame_idx = int(timestamp_ms * self._fps / 1000.0)
         return self.process_at_frame(frame_idx)
 
     def process_at_frame(self, frame_idx: int) -> dict:
-        """Process a specific frame and update running statistics.
-
-        The *frame_idx* is clamped to ``[0, total_frames - 1]`` so callers
-        never trigger an ``IndexError`` from out-of-range values.
-
-        Returns the frame result dict from the processor.
-        """
-        # Clamp to valid range to avoid IndexError.
+        """Process a specific frame and update running stats."""
         if self._total_frames > 0:
             frame_idx = max(0, min(frame_idx, self._total_frames - 1))
         else:
@@ -85,11 +64,7 @@ class RealtimeSession:
         return result
 
     def _update_stats(self, result: dict, elapsed: float) -> None:
-        """Incrementally update running aggregates from a single frame result.
-
-        This method is safe to call from multiple threads; all counter
-        mutations are serialised through ``self._stats_lock``.
-        """
+        """Incrementally update running aggregates from a single frame."""
         with self._stats_lock:
             self._frames_processed += 1
             self._total_processing_time += elapsed
@@ -114,13 +89,7 @@ class RealtimeSession:
                 self._camera_cuts_detected += 1
 
     def get_running_stats(self) -> dict:
-        """Return aggregated statistics from all processed frames so far.
-
-        Returns:
-            Dict with keys: frames_processed, total_players_detected,
-            avg_players_per_frame, avg_confidence, camera_cuts_detected,
-            unique_track_ids, processing_fps.
-        """
+        """Return aggregated stats from all processed frames so far."""
         with self._stats_lock:
             frames = self._frames_processed
             return {
@@ -144,14 +113,7 @@ class RealtimeSession:
             }
 
     def get_player_stats(self) -> Dict[int, dict]:
-        """Return per-player screen time statistics.
-
-        Returns:
-            Dict mapping track_id to a dict with:
-                - frames_seen: number of frames this player appeared in
-                - screen_time_ratio: fraction of processed frames containing
-                  this player
-        """
+        """Per-player screen time: track_id -> frames_seen + screen_time_ratio."""
         with self._stats_lock:
             frames = self._frames_processed
             return {
@@ -168,15 +130,7 @@ class RealtimeSession:
 
 
 class SessionManager:
-    """Manages multiple RealtimeSession instances (singleton-like).
-
-    Provides get-or-create semantics so callers can retrieve an existing
-    session for a match without tracking lifecycle themselves.
-
-    The singleton is implemented via ``__new__`` + ``__init__`` with a
-    ``_initialized`` guard so that ``_sessions`` is always set exactly once
-    and the instance is safe to pickle and to patch in tests.
-    """
+    """Singleton managing multiple RealtimeSession instances."""
 
     _instance: Optional["SessionManager"] = None
     _lock = threading.Lock()
@@ -190,8 +144,6 @@ class SessionManager:
             return cls._instance
 
     def __init__(self) -> None:
-        # Guard so repeated __init__ calls (which Python makes every time
-        # the constructor is called) do not reset the sessions dict.
         if self._initialized:
             return
         self._sessions: Dict[str, RealtimeSession] = {}
@@ -200,12 +152,7 @@ class SessionManager:
     def get_or_create(
         self, match_id: str, video_path: str, device: Optional[str] = None
     ) -> RealtimeSession:
-        """Return an existing session for match_id, or create a new one.
-
-        Thread-safe: the lookup-and-create is protected by ``_lock`` so
-        concurrent requests for the same *match_id* will not create
-        duplicate sessions.
-        """
+        """Return existing session for match_id or create a new one."""
         with self._lock:
             if match_id not in self._sessions:
                 self._sessions[match_id] = RealtimeSession(

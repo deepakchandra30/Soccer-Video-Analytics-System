@@ -28,7 +28,6 @@ class SoccerNetDataset(Dataset):
         self.feature_type = feature_type
         self.feature_dim = self.FEATURE_DIMS[feature_type]
 
-        # only keep directories that actually have labels
         self.matches = sorted([
             d for d in self.data_dir.iterdir()
             if d.is_dir() and (d / "Labels-v3.json").exists()

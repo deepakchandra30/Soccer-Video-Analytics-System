@@ -87,13 +87,11 @@ def main():
     set_seeds(42)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # load data
     print(f"Loading {args.feature_type} features from {args.data_dir}...")
     train_matches, _, _ = load_matches(args.data_dir, "train", args.feature_type)
     val_matches, val_dirs, val_ids = load_matches(args.data_dir, "valid", args.feature_type)
     print(f"  train: {len(train_matches)} matches, valid: {len(val_matches)} matches")
 
-    # datasets and loaders
     train_ds = ChunkedSoccerNetDataset(
         train_matches, chunk_size=TSM_CONFIG["chunk_size"],
         event_ratio=TSM_CONFIG["event_ratio"], feat_dim=args.feat_dim,
@@ -107,7 +105,6 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=args.batch_size,
                             shuffle=False, collate_fn=collate_fn, num_workers=0)
 
-    # model, optimizer, scheduler, loss
     model = TSMSpottingHead(
         feat_dim=args.feat_dim, num_classes=TSM_CONFIG["num_classes"],
         hidden_dim=TSM_CONFIG["hidden_dim"], n_shifts=TSM_CONFIG["n_shifts"],
@@ -123,13 +120,11 @@ def main():
 
     early_stop = EarlyStopping(patience=TSM_CONFIG["patience"], mode="min")
 
-    # wandb
     import wandb
     wandb.init(project=args.wandb_project, name="tsm-baseline",
                config={**TSM_CONFIG, "feat_dim": args.feat_dim,
                        "feature_type": args.feature_type})
 
-    # training loop
     best_val_loss = float("inf")
     for epoch in range(1, args.epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, criterion, args.device)
@@ -149,7 +144,6 @@ def main():
             print(f"Early stopping at epoch {epoch}")
             break
 
-    # generate predictions on validation set
     print("Generating predictions on validation split...")
     feat_map = {
         "pca512": ("1_ResNET_TF2_PCA512.npy", "2_ResNET_TF2_PCA512.npy"),
@@ -165,12 +159,10 @@ def main():
         framerate=TSM_CONFIG["framerate"], device=args.device,
     )
 
-    # evaluate
     print("Running SoccerNet evaluation...")
     results = run_evaluation(args.data_dir, pred_dir, split="valid")
     avg_map = results.get("a_mAP", 0.0)
 
-    # try to extract per-tolerance mAP
     map_1s = results.get("a_mAP_per_class_at1", results.get("a_mAP_at1", None))
     map_2s = results.get("a_mAP_per_class_at2", results.get("a_mAP_at2", None))
     map_5s = results.get("a_mAP_per_class_at5", results.get("a_mAP_at5", None))

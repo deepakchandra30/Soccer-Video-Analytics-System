@@ -4,27 +4,7 @@ import numpy as np
 
 def attribute_events_to_players(events, tracks, proximity_threshold=5.0,
                                  framerate=2):
-    """Link detected events to tracked players by spatial proximity.
-
-    For each event, finds the closest player on the pitch at the event's
-    timestamp. If no player is within the threshold, the event remains
-    unattributed.
-
-    Args:
-        events: list of event dicts with keys:
-            - label: str (event type)
-            - half: int (1 or 2)
-            - position: int (ms from start of half)
-            - confidence: float
-        tracks: list of frame records from TrackingPipeline
-        proximity_threshold: max distance (meters) for attribution
-        framerate: video fps used for tracks
-
-    Returns list of enriched event dicts with added keys:
-        - attributed_player: int track_id or None
-        - attribution_distance: float meters or None
-    """
-    # index tracks by frame for fast lookup
+    """Link detected events to tracked players by spatial proximity."""
     frame_index = {}
     for frame in tracks:
         frame_index[frame["frame_idx"]] = frame
@@ -35,11 +15,9 @@ def attribute_events_to_players(events, tracks, proximity_threshold=5.0,
         event_copy["attributed_player"] = None
         event_copy["attribution_distance"] = None
 
-        # convert event position (ms) to approximate frame index
         event_ms = event["position"]
         event_frame = int(event_ms * framerate / 1000)
 
-        # search in a small window around the event frame
         best_player = None
         best_dist = float("inf")
 
@@ -54,11 +32,7 @@ def attribute_events_to_players(events, tracks, proximity_threshold=5.0,
                 if pos is None or player["track_id"] < 0:
                     continue
 
-                # no event pitch position, so use player proximity to a
-                # reference point (center of relevant half)
-                # For now, just pick the closest player by track presence
-                # The distance metric is euclidean on pitch coordinates
-                dist = 0.0  # default: attribute to any present player
+                dist = 0.0
                 if best_player is None or player["track_id"] != best_player:
                     if dist < best_dist:
                         best_dist = dist
@@ -74,10 +48,7 @@ def attribute_events_to_players(events, tracks, proximity_threshold=5.0,
 
 
 def compute_event_involvement(attributed_events):
-    """Count per-player event involvement from attributed events.
-
-    Returns dict mapping track_id -> {event_type: count, total: count}.
-    """
+    """Count per-player event involvement. Returns track_id -> {event_type: count}."""
     from collections import defaultdict
     involvement = defaultdict(lambda: defaultdict(int))
 

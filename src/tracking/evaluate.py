@@ -9,22 +9,12 @@ def create_accumulator():
 
 
 def update_accumulator(acc, gt_ids, gt_boxes, hyp_ids, hyp_boxes, max_iou=0.5):
-    """Add one frame of ground truth and hypothesis tracks.
-
-    Args:
-        acc: MOTAccumulator instance
-        gt_ids: list of ground truth track IDs
-        gt_boxes: (N, 4) xyxy bounding boxes for ground truth
-        hyp_ids: list of hypothesis (predicted) track IDs
-        hyp_boxes: (M, 4) xyxy bounding boxes for predictions
-        max_iou: IoU threshold for valid matches
-    """
+    """Add one frame of GT and hypothesis tracks to accumulator."""
     if len(gt_boxes) == 0 or len(hyp_boxes) == 0:
         acc.update(gt_ids, hyp_ids,
                    np.empty((len(gt_ids), len(hyp_ids))))
         return
 
-    # convert xyxy to ltwh (left, top, width, height) for motmetrics
     gt_ltwh = _xyxy_to_ltwh(np.array(gt_boxes))
     hyp_ltwh = _xyxy_to_ltwh(np.array(hyp_boxes))
 
@@ -33,14 +23,7 @@ def update_accumulator(acc, gt_ids, gt_boxes, hyp_ids, hyp_boxes, max_iou=0.5):
 
 
 def compute_metrics(accumulators, names=None):
-    """Compute MOTA, IDF1, and other tracking metrics.
-
-    Args:
-        accumulators: list of MOTAccumulator instances
-        names: optional list of sequence names
-
-    Returns pandas DataFrame with metrics.
-    """
+    """Compute MOTA, IDF1 and other tracking metrics from accumulators."""
     if not isinstance(accumulators, list):
         accumulators = [accumulators]
     if names is None:

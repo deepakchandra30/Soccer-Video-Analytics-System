@@ -9,16 +9,11 @@ from src.models.temporal.pipeline import TwoStagePipeline
 
 
 def benchmark_latency(model, features, device="cpu", num_runs=100, warmup=10):
-    """Measure per-frame inference latency.
-
-    Uses CUDA events for GPU timing, time.perf_counter for CPU.
-    Returns dict with mean/std/p50/p95 ms per frame.
-    """
+    """Per-frame inference latency stats (mean/std/p50/p95 ms)."""
     model = model.to(device).eval()
     T = features.shape[0]
     use_cuda = device != "cpu" and torch.cuda.is_available()
 
-    # warmup
     with torch.no_grad():
         for _ in range(warmup):
             x = features.unsqueeze(0).to(device)
@@ -58,17 +53,11 @@ def benchmark_latency(model, features, device="cpu", num_runs=100, warmup=10):
 
 def benchmark_pipeline(coarse_model, fine_model, features, pipeline_config,
                         device="cpu", num_runs=10, warmup=2):
-    """Compare single-stage vs two-stage latency.
-
-    Returns dict with single_stage_ms, two_stage_ms, speedup_factor,
-    and candidate_ratio.
-    """
+    """Compare single-stage vs two-stage pipeline latency."""
     T = features.shape[0]
 
-    # single-stage: TSM on full match
     single = benchmark_latency(coarse_model, features, device, num_runs, warmup)
 
-    # two-stage: run pipeline to measure actual candidate ratio
     pipeline = TwoStagePipeline(coarse_model, fine_model, pipeline_config,
                                 device=device)
     half_len = T // 2
@@ -79,10 +68,8 @@ def benchmark_pipeline(coarse_model, fine_model, features, pipeline_config,
     candidate_count = pipeline.get_candidate_frame_count()
     candidate_ratio = candidate_count / max(T, 1)
 
-    # two-stage timing: coarse on full + fine on candidates
     coarse_time = single["mean_ms_per_frame"] * T
 
-    # estimate fine stage time
     if candidate_count > 0:
         fine_features = features[:min(candidate_count, T)]
         fine = benchmark_latency(fine_model, fine_features, device,

@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount real-time routes (imported after app creation to avoid circular imports)
+# imported after app creation to avoid circular imports
 try:
     from src.api.realtime_routes import router as realtime_router
     from src.api.websocket import router as ws_router
@@ -136,13 +136,11 @@ def _load_tracks(match_id: str):
     """Load tracking data from tracks.json or generate from features."""
     match_dir = _safe_match_dir(match_id)
 
-    # Try loading pre-computed tracks
     tracks_path = match_dir / "tracks.json"
     if tracks_path.exists():
         with open(tracks_path) as f:
             return json.load(f)
 
-    # Generate synthetic tracks from feature frame count
     stats = _load_feature_stats(match_id)
     total_frames = stats["total_frames"]
     if total_frames == 0:
@@ -175,13 +173,11 @@ def _generate_narrative(match_id: str, events):
     """Generate a narrative summary from events."""
     match_dir = _safe_match_dir(match_id)
 
-    # Try loading pre-computed narrative
     narrative_path = match_dir / "narrative.json"
     if narrative_path.exists():
         with open(narrative_path) as f:
             return json.load(f)
 
-    # Generate from events
     key_moments = []
     for e in events:
         key_moments.append({
@@ -190,7 +186,6 @@ def _generate_narrative(match_id: str, events):
             "description": f"{e['label']} at {e.get('game_time', 'unknown time')} by {e.get('team', 'unknown team')}",
         })
 
-    # Build player contributions from event teams
     team_counts = {}
     for e in events:
         team = e.get("team", "Unknown") or "Unknown"
@@ -286,7 +281,6 @@ def get_analytics(match_id: str):
     half1_events = [e for e in events if e["half"] == 1]
     half2_events = [e for e in events if e["half"] == 2]
 
-    # Build player_stats from team event data
     player_stats = []
     for pid, (team, counts) in enumerate(team_events.items()):
         total_involvement = sum(counts.values())

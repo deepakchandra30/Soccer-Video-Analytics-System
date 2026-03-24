@@ -13,11 +13,7 @@ from src.tracking.homography import PitchHomography
 
 
 class TrackingPipeline:
-    """Processes match video to produce per-frame player tracks with pitch coords.
-
-    Output: list of per-frame track records, each containing player positions
-    in both pixel and pitch coordinates.
-    """
+    """Runs detection + tracking on match video, outputs per-frame player tracks."""
     def __init__(self, detector=None, tracker=None, homography=None,
                  device=None):
         self.detector = detector or PlayerDetector(device=device)
@@ -26,18 +22,7 @@ class TrackingPipeline:
 
     def process_video(self, video_path, homography_points=None,
                       max_frames=None, progress=True):
-        """Run tracking on a video file.
-
-        Args:
-            video_path: path to .mkv or .mp4 video
-            homography_points: tuple of (image_pts, pitch_pts) for projection
-            max_frames: optional frame limit for testing
-            progress: show tqdm progress bar
-
-        Returns list of frame records:
-            [{"frame_idx": int, "players": [{"track_id": int, "bbox": [4],
-              "confidence": float, "pitch_xy": [2] or None}]}]
-        """
+        """Run tracking on a video file, returns list of per-frame records."""
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             raise ValueError(f"Cannot open video: {video_path}")
@@ -47,7 +32,6 @@ class TrackingPipeline:
         if max_frames:
             total = min(total, max_frames)
 
-        # estimate homography if points provided
         has_homography = False
         if homography_points is not None:
             img_pts, pitch_pts = homography_points
@@ -64,13 +48,9 @@ class TrackingPipeline:
             if not ret:
                 break
 
-            # detect players
             dets = self.detector.detect(frame)
-
-            # track with camera cut handling
             tracked = self.tracker.update(frame, dets)
 
-            # build frame record
             players = []
             for i in range(len(tracked["boxes"])):
                 bbox = tracked["boxes"][i].tolist()
@@ -82,7 +62,6 @@ class TrackingPipeline:
                     "pitch_xy": None,
                 }
 
-                # project foot position to pitch if homography available
                 if has_homography:
                     foot = PitchHomography.bbox_foot_position(
                         tracked["boxes"][i:i+1]

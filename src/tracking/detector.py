@@ -3,11 +3,7 @@ import numpy as np
 
 
 class PlayerDetector:
-    """Detects players in video frames using YOLOv8.
-
-    Filters for person class (COCO index 0) and optionally by confidence
-    and bounding box size to exclude non-players (referees at edges, etc).
-    """
+    """YOLOv8-based player detector, filters for person class."""
     def __init__(self, model_name="yolov8m.pt", confidence=0.25, device=None):
         from ultralytics import YOLO
         self.model = YOLO(model_name)
@@ -15,16 +11,7 @@ class PlayerDetector:
         self.device = device
 
     def detect(self, frame):
-        """Run detection on a single frame.
-
-        Args:
-            frame: (H, W, 3) uint8 numpy array (BGR or RGB)
-
-        Returns dict with:
-            boxes: (N, 4) xyxy float32 array
-            confidences: (N,) float32 array
-            class_ids: (N,) int array (all zeros = person)
-        """
+        """Detect players in a single frame, returns boxes/confidences/class_ids."""
         results = self.model(
             frame, classes=[0], conf=self.confidence,
             device=self.device, verbose=False,
@@ -45,5 +32,5 @@ class PlayerDetector:
         }
 
     def detect_batch(self, frames):
-        """Run detection on multiple frames."""
+        """Detect players in multiple frames."""
         return [self.detect(f) for f in frames]
