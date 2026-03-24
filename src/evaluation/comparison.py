@@ -61,18 +61,10 @@ def load_baseline_results(sota_path=None):
 
 
 def generate_comparison_table(project_results, baselines=None):
-    """Generate a merged markdown table with baselines and project results.
-
-    Args:
-        project_results: list of AblationResult objects
-        baselines: optional list of baseline dicts (loaded from SOTA_TABLE.md)
-
-    Returns markdown string.
-    """
+    """Generate a merged markdown table of project results and SOTA baselines."""
     if baselines is None:
         baselines = load_baseline_results()
 
-    # build unified row list
     rows = []
     for b in baselines:
         rows.append({
@@ -94,7 +86,6 @@ def generate_comparison_table(project_results, baselines=None):
             "source": "project",
         })
 
-    # sort by avg_map descending
     rows.sort(key=lambda x: x["avg_map"], reverse=True)
 
     lines = [

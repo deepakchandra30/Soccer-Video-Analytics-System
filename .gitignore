@@ -20,10 +20,7 @@ env/
 weights/
 
 # Data — large files excluded from version control
-data/raw/
-data/features/
-data/*.npy
-data/**/*.npy
+data/
 
 # Labels and processed data
 data/processed/

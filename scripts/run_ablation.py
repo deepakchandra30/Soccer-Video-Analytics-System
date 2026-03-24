@@ -30,7 +30,6 @@ def main():
     set_seeds(42)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # filter experiments
     if args.experiments == "all":
         experiments = ABLATION_EXPERIMENTS
     else:
@@ -43,7 +42,6 @@ def main():
             print(f"  {e['name']}")
         return
 
-    # run ablation
     runner = AblationRunner(data_dir=args.data_dir, output_dir=args.output_dir,
                             device=args.device)
     for exp in experiments:
@@ -53,12 +51,10 @@ def main():
     print(f"Running {len(experiments)} experiments...")
     results = runner.run(checkpoint_dir=args.checkpoints_dir)
 
-    # save results
     json_path = os.path.join(args.output_dir, "ablation_results.json")
     runner.save_results(json_path)
     print(f"Results saved to {json_path}")
 
-    # generate comparison table
     baselines = load_baseline_results()
     table = generate_comparison_table(results, baselines)
     table_path = os.path.join(args.output_dir, "comparison_table.md")
@@ -66,7 +62,6 @@ def main():
         f.write(table)
     print(f"Comparison table saved to {table_path}")
 
-    # generate plots
     plot_accuracy_vs_speed(
         results, baselines,
         output_path=os.path.join(args.output_dir, "accuracy_vs_speed.png"),
@@ -77,7 +72,6 @@ def main():
     )
     print("Plots saved.")
 
-    # print summary
     print("\n" + runner.to_markdown_table())
 
 

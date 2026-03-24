@@ -8,17 +8,7 @@ from SoccerNet.Evaluation.utils import INVERSE_EVENT_DICTIONARY_V2
 
 def nms_detections(frame_scores, nms_window=30, confidence_threshold=0.2,
                    framerate=2, half=1):
-    """Per-class non-maximum suppression on frame-level scores.
-
-    Args:
-        frame_scores: (T, num_classes) numpy array of probabilities
-        nms_window: suppression window in frames
-        confidence_threshold: minimum score to consider
-        framerate: feature extraction fps (2 for SoccerNet)
-        half: which half of the match (1 or 2)
-
-    Returns list of prediction dicts for results_spotting.json.
-    """
+    """Per-class NMS on frame-level scores, returns prediction dicts."""
     T, num_classes = frame_scores.shape
     predictions = []
 
@@ -49,17 +39,7 @@ def save_predictions(predictions, output_path):
 
 def sliding_window_inference(model, features, window_size=40, stride=20,
                              device="cpu"):
-    """Run model on overlapping windows and average the predictions.
-
-    Args:
-        model: TSMSpottingHead or similar (produces (1, T, C+1) logits)
-        features: (N, feat_dim) tensor for one half
-        window_size: window length in frames
-        stride: step between windows
-        device: torch device string
-
-    Returns: (N, num_classes) numpy array (background class excluded).
-    """
+    """Run model on overlapping windows, average predictions, return (N, num_classes) array."""
     N = features.shape[0]
     score_sum = None
     count = np.zeros(N, dtype=np.float32)
@@ -71,7 +51,6 @@ def sliding_window_inference(model, features, window_size=40, stride=20,
             end = min(start + window_size, N)
             window = features[start:end]
 
-            # pad short tail window
             if window.shape[0] < window_size:
                 pad = torch.zeros(window_size - window.shape[0], window.shape[1])
                 window = torch.cat([window, pad], dim=0)

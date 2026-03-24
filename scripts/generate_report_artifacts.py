@@ -20,18 +20,15 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # load results
     results = AblationRunner.load_results(args.results_json)
     print(f"Loaded {len(results)} experiment results")
 
-    # comparison table
     baselines = load_baseline_results()
     table = generate_comparison_table(results, baselines)
     table_path = os.path.join(args.output_dir, "comparison_table.md")
     with open(table_path, "w") as f:
         f.write(table)
 
-    # plots
     plot_accuracy_vs_speed(
         results, baselines,
         output_path=os.path.join(args.output_dir, "accuracy_vs_speed.png"),
@@ -41,7 +38,6 @@ def main():
         output_path=os.path.join(args.output_dir, "ablation_heatmap.png"),
     )
 
-    # compact summary
     best = max(results, key=lambda r: r.avg_map) if results else None
     summary = {
         "num_experiments": len(results),

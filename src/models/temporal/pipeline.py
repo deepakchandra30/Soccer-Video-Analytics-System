@@ -25,14 +25,7 @@ class TwoStagePipeline:
         self._candidate_frame_count = 0
 
     def detect_candidates(self, features, half=1):
-        """Run coarse detector and return candidate event windows.
-
-        Args:
-            features: (N, feat_dim) tensor for one half
-            half: which match half (1 or 2)
-
-        Returns list of candidate dicts with start/end frames and predictions.
-        """
+        """Run coarse detector and return candidate event windows."""
         scores = sliding_window_inference(
             self.coarse, features,
             window_size=self.config["coarse_window_size"],
@@ -40,7 +33,6 @@ class TwoStagePipeline:
             device=self.device,
         )
 
-        # detect events at low threshold for high recall
         raw_preds = nms_detections(
             scores,
             nms_window=self.config["coarse_nms_window"],
@@ -49,7 +41,6 @@ class TwoStagePipeline:
             half=half,
         )
 
-        # convert predictions back to candidate windows around each detection
         candidates = []
         framerate = self.config.get("framerate", 2)
         pad = self.config.get("fine_pad_frames", 20)
@@ -69,14 +60,7 @@ class TwoStagePipeline:
         return candidates
 
     def classify_candidates(self, features, candidates):
-        """Re-classify candidate windows with the fine model.
-
-        Args:
-            features: (N, feat_dim) tensor for one half
-            candidates: list of candidate dicts from detect_candidates
-
-        Returns list of refined prediction dicts.
-        """
+        """Re-classify candidate windows with the fine model."""
         self.fine.eval()
         refined = []
 
@@ -105,7 +89,6 @@ class TwoStagePipeline:
                 logits = self.fine(inp)  # (1, T//4, 18)
                 probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
 
-            # map fine model output back to event classes (skip background)
             event_probs = probs[:, 1:]  # (T_out, 17)
 
             fine_preds = nms_detections(
@@ -129,21 +112,13 @@ class TwoStagePipeline:
         return refined
 
     def run(self, half1_features, half2_features):
-        """Run full two-stage pipeline on a match.
-
-        Args:
-            half1_features: (N1, feat_dim) tensor
-            half2_features: (N2, feat_dim) tensor
-
-        Returns list of prediction dicts for results_spotting.json.
-        """
+        """Run full two-stage pipeline on a match, returns prediction dicts."""
         self._candidate_frame_count = 0
         all_preds = []
 
         for half_idx, features in enumerate([half1_features, half2_features], 1):
             candidates = self.detect_candidates(features, half=half_idx)
 
-            # track how many frames the fine model actually processes
             for c in candidates:
                 self._candidate_frame_count += c["end_frame"] - c["start_frame"]
 
