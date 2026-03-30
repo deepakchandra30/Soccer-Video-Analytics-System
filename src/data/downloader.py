@@ -13,7 +13,7 @@ def download_features(local_directory="data/", splits=None, retries=5, backoff=1
         splits = ["train", "valid", "test"]
 
     dl = SoccerNetDownloader(LocalDirectory=local_directory)
-    files = ["1_ResNET_TF2_PCA512.npy", "2_ResNET_TF2_PCA512.npy", "Labels-v3.json"]
+    files = ["1_ResNET_TF2_PCA512.npy", "2_ResNET_TF2_PCA512.npy", "Labels-v2.json", "Labels-v3.json"]
 
     for attempt in range(1, retries + 1):
         try:

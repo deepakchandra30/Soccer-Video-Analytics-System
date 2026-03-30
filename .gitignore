@@ -69,3 +69,4 @@ dashboard/
 docs/
 tests/
 .pytest_cache/
+outputs/
