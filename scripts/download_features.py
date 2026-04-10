@@ -11,7 +11,7 @@ from src.data.downloader import download_features, download_video
 def main():
     parser = argparse.ArgumentParser(description="Download SoccerNet data")
     parser.add_argument("--splits", nargs="+", default=["train", "valid", "test"])
-    parser.add_argument("--local-dir", default="data/")
+    parser.add_argument("--local-dir", "--data-dir", dest="local_dir", default="data/")
     parser.add_argument("--video", action="store_true", help="Also download match videos (requires NDA password)")
     parser.add_argument("--password", default="", help="SoccerNet NDA password for video downloads")
     parser.add_argument("--dry-run", action="store_true")
