@@ -17,7 +17,13 @@ class RealtimeProcessor:
     _CACHE_LIMIT = 500
 
     def __init__(self, video_path, device=None):
-        """Open video file and read metadata."""
+        """Open a video file and read its metadata.
+
+        Args:
+            video_path: Path to the video file.
+            device: Torch device string for YOLO inference (e.g. "cuda:0").
+                    None lets the detector choose automatically.
+        """
         self._video_path = str(video_path)
         self._device = device
 
@@ -32,6 +38,7 @@ class RealtimeProcessor:
         self.width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+        # Lazy-init placeholders
         self._detector = None
         self._tracker = None
 
@@ -127,7 +134,31 @@ class RealtimeProcessor:
     # ------------------------------------------------------------------
 
     def process_frame(self, frame_idx):
-        """Detect and track players in a single frame, returns result dict."""
+        """Detect and track players in a single frame.
+
+        Args:
+            frame_idx: Zero-based frame index to process.
+
+        Returns:
+            dict matching the TrackingPipeline per-frame format::
+
+                {
+                    "frame_idx": int,
+                    "timestamp_ms": int,
+                    "is_camera_cut": bool,
+                    "num_players": int,
+                    "players": [
+                        {
+                            "track_id": int,
+                            "bbox": [x1, y1, x2, y2],
+                            "confidence": float,
+                            "pitch_xy": None,
+                        },
+                        ...
+                    ],
+                }
+        """
+        # Return cached result immediately if available.
         if frame_idx in self._cache:
             self._cache.move_to_end(frame_idx)
             return self._cache[frame_idx]
@@ -192,14 +223,27 @@ class RealtimeProcessor:
             return result
 
     def process_range(self, start_frame, end_frame, stride=1):
-        """Process a contiguous range of frames, returns list of result dicts."""
+        """Process a contiguous range of frames.
+
+        Args:
+            start_frame: First frame index (inclusive).
+            end_frame: Last frame index (exclusive).
+            stride: Step between frames (default 1).
+
+        Returns:
+            List of result dicts, one per processed frame.
+        """
         results = []
         for idx in range(start_frame, end_frame, stride):
             results.append(self.process_frame(idx))
         return results
 
     def get_video_info(self):
-        """Return fps, total_frames, width, height, duration_ms."""
+        """Return a dict summarising the open video's properties.
+
+        Returns:
+            dict with keys fps, total_frames, width, height, duration_ms.
+        """
         duration_ms = int(round(self.total_frames / self.fps * 1000)) if self.fps else 0
         return {
             "fps": self.fps,

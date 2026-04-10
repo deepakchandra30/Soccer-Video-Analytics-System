@@ -8,7 +8,10 @@ import wandb
 
 
 def load_and_validate_features(feature_path, expected_dim=512):
-    """Load .npy feature file and validate shape (2D, correct dim, enough frames)."""
+    """Load a .npy feature file and sanity-check its shape.
+
+    For PCA-512 features at 2fps, a 45-min half should have ~5400 frames.
+    """
     features = np.load(feature_path)
     assert features.ndim == 2, f"Expected 2D, got {features.ndim}D from {feature_path}"
     assert features.shape[1] == expected_dim, (
@@ -28,6 +31,7 @@ def extract_features(video_path, output_path, model_name="resnet50",
 
     from decord import VideoReader, cpu as decord_cpu
 
+    # load pretrained resnet, chop off the FC layer
     if model_name == "resnet50":
         model = models.resnet50(weights="IMAGENET1K_V1")
     elif model_name == "resnet101":

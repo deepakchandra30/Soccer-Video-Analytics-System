@@ -43,6 +43,7 @@ class ChunkedSoccerNetDataset(Dataset):
         features, annotations = self.matches[match_idx]
         T = features.shape[0]
 
+        # decide whether to sample around an event or randomly
         event_frames = self._event_frames[match_idx]
         if random.random() < self.event_ratio and len(event_frames) > 0:
             center, _ = random.choice(event_frames)
@@ -53,11 +54,13 @@ class ChunkedSoccerNetDataset(Dataset):
         end = min(start + self.chunk_size, T)
         chunk = features[start:end]
 
+        # pad if chunk is shorter than chunk_size
         if chunk.shape[0] < self.chunk_size:
             pad = np.zeros((self.chunk_size - chunk.shape[0], self.feat_dim),
                            dtype=np.float32)
             chunk = np.concatenate([chunk, pad])
 
+        # build frame-level targets
         targets = np.zeros(self.chunk_size, dtype=np.int64)
         for ann in annotations:
             frame = self._parse_gametime(ann)

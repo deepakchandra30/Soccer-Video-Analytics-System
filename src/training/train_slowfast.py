@@ -45,11 +45,13 @@ def main():
     set_seeds(42)
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # load data
     print(f"Loading features from {args.data_dir}...")
     train_matches, _, _ = load_matches(args.data_dir, "train")
     val_matches, val_dirs, val_ids = load_matches(args.data_dir, "valid")
     print(f"  train: {len(train_matches)} matches, valid: {len(val_matches)} matches")
 
+    # datasets -- larger chunks for SlowFast
     train_ds = ChunkedSoccerNetDataset(
         train_matches, chunk_size=SLOWFAST_CONFIG["chunk_size"],
         event_ratio=0.7, feat_dim=args.feat_dim,
@@ -63,6 +65,7 @@ def main():
     val_loader = DataLoader(val_ds, batch_size=args.batch_size,
                             shuffle=False, collate_fn=collate_fn, num_workers=0)
 
+    # model, optimizer, loss
     model = SlowFastSpotting(
         feat_dim=args.feat_dim, num_classes=SLOWFAST_CONFIG["num_classes"],
         slow_stride=SLOWFAST_CONFIG["slow_stride"],
@@ -81,10 +84,12 @@ def main():
 
     early_stop = EarlyStopping(patience=SLOWFAST_CONFIG["patience"], mode="min")
 
+    # wandb
     import wandb
     wandb.init(project=args.wandb_project, name="slowfast-training",
                config={**SLOWFAST_CONFIG, "feat_dim": args.feat_dim})
 
+    # train SlowFast
     best_val_loss = float("inf")
     for epoch in range(1, args.epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, criterion,
@@ -106,6 +111,7 @@ def main():
             print(f"Early stopping at epoch {epoch}")
             break
 
+    # evaluate: SlowFast single-stage
     print("\nGenerating SlowFast single-stage predictions...")
     sf_pred_dir = os.path.join(args.output_dir, "predictions_slowfast")
     generate_predictions(
@@ -115,6 +121,7 @@ def main():
     sf_results = run_evaluation(args.data_dir, sf_pred_dir, split="valid")
     sf_map = sf_results.get("a_mAP", 0.0)
 
+    # evaluate: two-stage pipeline
     print("Running two-stage pipeline evaluation...")
     coarse = TSMSpottingHead(
         feat_dim=args.feat_dim, num_classes=17,
@@ -124,6 +131,7 @@ def main():
 
     pipeline = TwoStagePipeline(coarse, model, PIPELINE_CONFIG, device=args.device)
 
+    # generate two-stage predictions
     from src.models.temporal.postprocess import save_predictions
     ts_pred_dir = os.path.join(args.output_dir, "predictions_twostage")
     for match_dir, match_id in zip(val_dirs, val_ids):
@@ -137,11 +145,13 @@ def main():
     ts_results = run_evaluation(args.data_dir, ts_pred_dir, split="valid")
     ts_map = ts_results.get("a_mAP", 0.0)
 
+    # benchmark latency
     print("Benchmarking latency...")
     bench_features = torch.randn(1000, args.feat_dim)
     bench = benchmark_pipeline(coarse, model, bench_features, PIPELINE_CONFIG,
                                device=args.device, num_runs=5, warmup=2)
 
+    # print results table
     print(f"\n{'Mode':<15} {'avg-mAP tight':>14} {'ms/frame':>10} {'Speedup':>9}")
     print("-" * 50)
     tsm_ms = bench["single_stage_ms"] / 1000

@@ -8,7 +8,13 @@ import numpy as np
 
 
 def plot_accuracy_vs_speed(results, baselines=None, output_path="accuracy_vs_speed.png"):
-    """Scatter plot: mAP (y) vs ms/frame (x). Saves PNG to output_path."""
+    """Scatter plot: mAP (y) vs ms/frame (x) for all configurations.
+
+    Args:
+        results: list of AblationResult objects
+        baselines: list of baseline dicts (from load_baseline_results)
+        output_path: path to save PNG
+    """
     fig, ax = plt.subplots(figsize=(10, 7))
 
     if not results and not baselines:
@@ -22,12 +28,15 @@ def plot_accuracy_vs_speed(results, baselines=None, output_path="accuracy_vs_spe
         plt.close(fig)
         return
 
+    # plot baselines as gray circles
     if baselines:
         for b in baselines:
+            # baselines don't have latency data, place them at x=0
             ax.scatter(0, b["avg_map"], c="gray", marker="o", s=50, alpha=0.6)
             ax.annotate(b["model"], (0, b["avg_map"]), fontsize=7,
                         xytext=(5, 2), textcoords="offset points")
 
+    # plot project results with different markers by model type
     markers = {"tsm": ("s", "steelblue"), "slowfast": ("^", "seagreen"),
                "two_stage": ("*", "firebrick")}
     for r in results:
@@ -43,6 +52,7 @@ def plot_accuracy_vs_speed(results, baselines=None, output_path="accuracy_vs_spe
     ax.set_title("Accuracy vs Inference Speed — SoccerNet-v3 Action Spotting")
     ax.grid(True, alpha=0.3)
 
+    # deduplicate legend
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
     if by_label:
@@ -79,6 +89,7 @@ def plot_ablation_heatmap(results, output_path="ablation_heatmap.png"):
     ax.set_yticks(range(len(names)))
     ax.set_yticklabels(names, fontsize=8)
 
+    # annotate cells
     for i in range(len(names)):
         for j in range(len(cols)):
             val = data[i, j]

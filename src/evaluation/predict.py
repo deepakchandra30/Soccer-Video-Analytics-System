@@ -17,7 +17,21 @@ def generate_predictions(model, match_dirs, match_ids, output_dir,
                                         "2_ResNET_TF2_PCA512.npy"),
                          window_size=40, stride=20, nms_window=30,
                          confidence_threshold=0.2, framerate=2, device="cpu"):
-    """Run inference on all matches and write results_spotting.json per match."""
+    """Run inference on all matches and write results_spotting.json per match.
+
+    Args:
+        model: trained temporal model
+        match_dirs: list of paths to match data directories
+        match_ids: list of match identifiers (must match SoccerNet naming)
+        output_dir: root directory for prediction output
+        feature_files: tuple of (half1_file, half2_file) names
+        window_size: sliding window size in frames
+        stride: sliding window stride
+        nms_window: NMS suppression window in frames
+        confidence_threshold: minimum detection confidence
+        framerate: feature fps
+        device: torch device
+    """
     model.eval()
     f1_name, f2_name = feature_files
 
@@ -46,6 +60,7 @@ def generate_predictions(model, match_dirs, match_ids, output_dir,
             )
             all_preds.extend(half_preds)
 
+        # write predictions
         out_path = Path(output_dir) / match_id
         out_path.mkdir(parents=True, exist_ok=True)
         save_predictions(all_preds, str(out_path / "results_spotting.json"))

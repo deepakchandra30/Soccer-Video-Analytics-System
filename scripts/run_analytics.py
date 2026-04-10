@@ -27,6 +27,7 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # load inputs
     with open(args.events_json) as f:
         events_data = json.load(f)
     events = events_data.get("predictions", [])
@@ -35,6 +36,7 @@ def main():
         tracks_data = json.load(f)
     tracks = tracks_data.get("tracks", [])
 
+    # compute analytics
     print("Computing match analytics...")
     analytics = compute_match_analytics(events, tracks, fps=args.fps)
     analytics_path = os.path.join(args.output_dir, "analytics.json")
@@ -44,6 +46,7 @@ def main():
           f"{analytics['num_attributed']} attributed, "
           f"{analytics['num_players_tracked']} players")
 
+    # generate narrative if requested
     if args.generate_narrative:
         print("Generating match narrative...")
         gen = NarrativeGenerator(model=args.model)
@@ -52,6 +55,7 @@ def main():
         save_narrative(narrative, narr_path)
         print(f"Narrative saved to {narr_path}")
 
+        # fact-check
         print("Running fact-check...")
         checks = validate_narrative(narrative, analytics)
         score = compute_factcheck_score(checks)

@@ -5,14 +5,14 @@ import supervision as sv
 
 
 class CameraCutDetector:
-    """Detects camera cuts by comparing frame histograms."""
+    """Detects camera cuts via histogram comparison between consecutive frames."""
 
     def __init__(self, threshold=0.4):
         self.threshold = threshold
         self.prev_hist = None
 
     def is_cut(self, frame):
-        """Returns True if this frame is a camera cut."""
+        """Returns True if this frame is a camera cut from the previous one."""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
         hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
         cv2.normalize(hist, hist)
@@ -30,7 +30,11 @@ class CameraCutDetector:
 
 
 class PlayerTracker:
-    """ByteTrack tracker that resets on camera cuts."""
+    """ByteTrack tracker with automatic camera cut handling.
+
+    On camera cuts, the tracker resets — player IDs restart from scratch
+    since identity cannot be maintained across different camera angles.
+    """
     def __init__(self, track_threshold=0.25, lost_buffer=30,
                  match_threshold=0.8, frame_rate=25, cut_threshold=0.4):
         self.tracker = sv.ByteTrack(
@@ -43,7 +47,18 @@ class PlayerTracker:
         self.frame_rate = frame_rate
 
     def update(self, frame, detections_dict):
-        """Process one frame, returns tracked boxes with IDs and cut flag."""
+        """Process one frame of detections.
+
+        Args:
+            frame: (H, W, 3) uint8 frame (used for camera cut detection)
+            detections_dict: output from PlayerDetector.detect()
+
+        Returns dict with:
+            boxes: (N, 4) xyxy
+            confidences: (N,)
+            tracker_ids: (N,) persistent track IDs
+            is_camera_cut: bool
+        """
         is_cut = self.cut_detector.is_cut(frame)
         if is_cut:
             self.tracker.reset()
@@ -60,12 +75,14 @@ class PlayerTracker:
                 "is_camera_cut": is_cut,
             }
 
+        # build supervision Detections object
         detections = sv.Detections(
             xyxy=boxes,
             confidence=confs,
             class_id=class_ids,
         )
 
+        # update tracker
         tracked = self.tracker.update_with_detections(detections)
 
         return {

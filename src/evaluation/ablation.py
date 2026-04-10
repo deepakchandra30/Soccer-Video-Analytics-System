@@ -65,6 +65,7 @@ class AblationRunner:
         model = self._build_model(config)
         num_params = self._count_params(model)
 
+        # try to load checkpoint
         if checkpoint_dir:
             ckpt_path = os.path.join(checkpoint_dir, name, "best.pt")
             if os.path.exists(ckpt_path):
@@ -72,6 +73,7 @@ class AblationRunner:
                                   weights_only=False)
                 model.load_state_dict(ckpt["model_state_dict"])
 
+        # measure latency
         feat_dim = config.get("feat_dim", 512)
         chunk_size = config.get("chunk_size", 40)
         dummy = torch.randn(chunk_size, feat_dim)

@@ -31,15 +31,28 @@ PITCH_KEYPOINTS = {
 
 
 class PitchHomography:
-    """Homography between image pixels and pitch coordinates."""
+    """Estimates and applies homography between image pixels and pitch coordinates.
+
+    Typical usage:
+        1. Provide corresponding image/pitch keypoints
+        2. Call estimate() to compute the homography matrix
+        3. Call project_to_pitch() to map player foot positions to pitch coords
+    """
     def __init__(self):
-        self.H = None
-        self.H_inv = None
+        self.H = None       # image -> pitch
+        self.H_inv = None   # pitch -> image
         self.inlier_mask = None
 
     def estimate(self, image_points, pitch_points, method=cv2.RANSAC,
                  reproj_threshold=5.0):
-        """Estimate homography from image<->pitch point pairs, needs >= 4 points."""
+        """Estimate homography from image<->pitch point correspondences.
+
+        Args:
+            image_points: (N, 2) pixel coordinates in the image
+            pitch_points: (N, 2) corresponding pitch coordinates in meters
+
+        Returns True if estimation succeeded (needs >= 4 points).
+        """
         if len(image_points) < 4:
             return False
 
@@ -56,7 +69,13 @@ class PitchHomography:
         return True
 
     def project_to_pitch(self, pixel_points):
-        """Project pixel coordinates to pitch coordinates in meters."""
+        """Project pixel coordinates to pitch coordinates.
+
+        Args:
+            pixel_points: (N, 2) pixel coordinates
+
+        Returns: (N, 2) pitch coordinates in meters
+        """
         if self.H is None:
             raise ValueError("Homography not estimated yet — call estimate() first")
 
@@ -79,7 +98,13 @@ class PitchHomography:
 
     @staticmethod
     def bbox_foot_position(boxes):
-        """Bottom-center of xyxy bounding boxes as foot positions."""
+        """Get foot position (bottom-center) from xyxy bounding boxes.
+
+        Args:
+            boxes: (N, 4) xyxy array
+
+        Returns: (N, 2) foot pixel coordinates
+        """
         if len(boxes) == 0:
             return np.empty((0, 2), dtype=np.float32)
         x_center = (boxes[:, 0] + boxes[:, 2]) / 2

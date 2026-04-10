@@ -7,7 +7,10 @@ from src.narratives.prompts import MATCH_SUMMARY_SYSTEM, MATCH_SUMMARY_USER
 
 
 class NarrativeGenerator:
-    """Generates structured match narratives using an OpenAI LLM."""
+    """Generates structured match narratives using an OpenAI-compatible LLM.
+
+    Uses JSON mode for structured output and Pydantic for validation.
+    """
     def __init__(self, api_key=None, model="gpt-4o-mini", base_url=None):
         from openai import OpenAI
         self.client = OpenAI(
@@ -17,7 +20,14 @@ class NarrativeGenerator:
         self.model = model
 
     def generate(self, analytics_data):
-        """Generate a match narrative from analytics data."""
+        """Generate a match narrative from analytics data.
+
+        Args:
+            analytics_data: dict from compute_match_analytics()
+
+        Returns MatchNarrative pydantic model.
+        """
+        # format input data for the prompt
         events_json = json.dumps(
             analytics_data.get("attributed_events", [])[:20],  # limit for context
             indent=2,

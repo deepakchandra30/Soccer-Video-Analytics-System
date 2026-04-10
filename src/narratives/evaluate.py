@@ -24,7 +24,14 @@ def compute_bleu(reference_text, generated_text):
 
 
 def evaluate_narrative(narrative, reference_summary=None):
-    """Evaluate a generated narrative. Returns metrics dict."""
+    """Evaluate a generated narrative.
+
+    Args:
+        narrative: MatchNarrative instance
+        reference_summary: optional reference text for BLEU computation
+
+    Returns dict with evaluation metrics.
+    """
     metrics = {
         "num_key_moments": len(narrative.key_moments),
         "num_player_contributions": len(narrative.player_contributions),
