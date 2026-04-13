@@ -16,12 +16,16 @@ class ChunkedSoccerNetDataset(Dataset):
     """
     def __init__(self, matches, chunk_size=40, event_ratio=0.7,
                  num_classes=17, framerate=2, feat_dim=512):
-        self.matches = matches        # list of (features_np, annotations)
+        self.matches = []        # list of (features_np, normalized_annotations)
         self.chunk_size = chunk_size
         self.event_ratio = event_ratio
         self.num_classes = num_classes
         self.framerate = framerate
         self.feat_dim = feat_dim
+
+        for feats, anns in matches:
+            normalized = self._iter_annotations(anns)
+            self.matches.append((feats, normalized))
 
         # pre-compute event frame indices per match for faster sampling
         self._event_frames = []
@@ -77,8 +81,46 @@ class ChunkedSoccerNetDataset(Dataset):
 
     def _parse_gametime(self, event):
         """Convert 'H - MM:SS' gameTime string to frame index."""
+        if not isinstance(event, dict):
+            return -1
+
         game_time = event.get("gameTime", "1 - 00:00")
+        if not isinstance(game_time, str):
+            return -1
+
         parts = game_time.split(" - ")
         time_str = parts[1] if len(parts) > 1 else parts[0]
-        minutes, seconds = map(int, time_str.split(":"))
+        try:
+            minutes, seconds = map(int, time_str.split(":"))
+        except (ValueError, TypeError):
+            return -1
+
         return self.framerate * (minutes * 60 + seconds)
+
+    def _iter_annotations(self, annotations):
+        """Normalize annotation container to a flat list of event dicts."""
+        if isinstance(annotations, dict):
+            events = annotations.values()
+        elif isinstance(annotations, list):
+            events = annotations
+        else:
+            return []
+
+        normalized = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+
+            if "imageMetadata" in event and isinstance(event["imageMetadata"], dict):
+                meta = event["imageMetadata"]
+                normalized.append({
+                    "gameTime": meta.get("gameTime", "1 - 00:00"),
+                    "label": meta.get("label", ""),
+                })
+            else:
+                normalized.append({
+                    "gameTime": event.get("gameTime", "1 - 00:00"),
+                    "label": event.get("label", ""),
+                })
+
+        return normalized
