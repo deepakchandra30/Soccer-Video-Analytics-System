@@ -40,7 +40,7 @@ def load_matches(data_dir, split, feature_type="pca512"):
         game_dir = os.path.join(data_dir, game)
         f1_path = os.path.join(game_dir, f1_name)
         f2_path = os.path.join(game_dir, f2_name)
-        label_path = os.path.join(game_dir, "Labels-v3.json")
+        label_path = os.path.join(game_dir, "Labels-v2.json")
 
         if not all(os.path.exists(p) for p in [f1_path, f2_path, label_path]):
             continue
@@ -51,7 +51,7 @@ def load_matches(data_dir, split, feature_type="pca512"):
 
         with open(label_path) as f:
             labels = json.load(f)
-        annotations = labels.get("actions", [])
+        annotations = labels.get("annotations", [])
 
         matches.append((features, annotations))
         game_dirs.append(game_dir)
