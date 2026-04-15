@@ -1,4 +1,4 @@
-"""SlowFast training and two-stage evaluation entry point."""
+"""Training entry point for SlowFast model and two-stage evaluation."""
 import argparse
 import os
 
@@ -9,15 +9,14 @@ from torch.utils.data import DataLoader
 
 from config.seeds import set_seeds
 from config.slowfast_config import SLOWFAST_CONFIG
-from config.pipeline_config import PIPELINE_CONFIG
 from src.models.temporal.slowfast import SlowFastSpotting
 from src.models.temporal.tsm import TSMSpottingHead
 from src.models.temporal.pipeline import TwoStagePipeline
 from src.models.temporal.losses import get_class_weights
 from src.data.chunked_dataset import ChunkedSoccerNetDataset
 from src.training.trainer import (
-    train_epoch, validate_epoch, EarlyStopping,
-    save_checkpoint, load_checkpoint,
+    train_epoch_downsampled, validate_epoch_downsampled,
+    EarlyStopping, save_checkpoint,
 )
 from src.training.train_tsm import load_matches, collate_fn
 from src.evaluation.predict import generate_predictions
@@ -78,8 +77,10 @@ def main():
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
-    weights = get_class_weights(SLOWFAST_CONFIG["num_classes"],
-                                SLOWFAST_CONFIG["bg_weight"])
+    weights = get_class_weights(
+        SLOWFAST_CONFIG["num_classes"],
+        SLOWFAST_CONFIG["bg_weight"],
+    )
     criterion = torch.nn.CrossEntropyLoss(weight=weights.to(args.device))
 
     early_stop = EarlyStopping(patience=SLOWFAST_CONFIG["patience"], mode="min")
@@ -92,15 +93,23 @@ def main():
     # train SlowFast
     best_val_loss = float("inf")
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, optimizer, criterion,
-                                 args.device)
-        val_loss = validate_epoch(model, val_loader, criterion, args.device)
+        train_loss = train_epoch_downsampled(
+            model, train_loader, optimizer, criterion, args.device,
+            target_stride=SLOWFAST_CONFIG["slow_stride"],
+        )
+        val_loss = validate_epoch_downsampled(
+            model, val_loader, criterion, args.device,
+            target_stride=SLOWFAST_CONFIG["slow_stride"],
+        )
         scheduler.step()
 
-        wandb.log({"train/loss": train_loss, "val/loss": val_loss,
-                    "lr": scheduler.get_last_lr()[0], "epoch": epoch})
-        print(f"Epoch {epoch}/{args.epochs}  "
-              f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}")
+        wandb.log({
+            "train/loss": train_loss,
+            "val/loss": val_loss,
+            "lr": scheduler.get_last_lr()[0],
+            "epoch": epoch,
+        })
+        print(f"Epoch {epoch}/{args.epochs}  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -111,62 +120,62 @@ def main():
             print(f"Early stopping at epoch {epoch}")
             break
 
-    # evaluate: SlowFast single-stage
-    print("\nGenerating SlowFast single-stage predictions...")
-    sf_pred_dir = os.path.join(args.output_dir, "predictions_slowfast")
+    # --------------------------
+    # Two-stage evaluation setup
+    # --------------------------
+    print("Loading coarse TSM checkpoint for two-stage pipeline...")
+    coarse = TSMSpottingHead(
+        feat_dim=args.feat_dim, num_classes=SLOWFAST_CONFIG["num_classes"],
+        hidden_dim=256, n_shifts=2,
+    ).to(args.device)
+
+    coarse_ckpt = torch.load(args.coarse_checkpoint, map_location=args.device, weights_only=False)
+    coarse.load_state_dict(coarse_ckpt["model_state_dict"])
+    coarse.eval()
+
+    model.eval()
+
+    pipeline_cfg = {
+        "coarse_window_size": 40,
+        "coarse_stride": 20,
+        "coarse_nms_window": 30,
+        "coarse_confidence_threshold": 0.2,
+        "fine_pad_frames": 20,
+        "framerate": 2,
+    }
+    pipeline = TwoStagePipeline(coarse_model=coarse, fine_model=model,
+                                config=pipeline_cfg, device=args.device)
+
+    # benchmark two-stage latency
+    try:
+        bench = benchmark_pipeline(pipeline, val_dirs[:3], num_runs=1, device=args.device)
+        print("\nTwo-stage benchmark:")
+        print(f"  mean time/match: {bench['mean_time_per_match_s']:.2f}s")
+        print(f"  candidate ratio: {bench['mean_candidate_ratio']*100:.1f}%")
+        wandb.log({
+            "benchmark/mean_time_per_match_s": bench["mean_time_per_match_s"],
+            "benchmark/candidate_ratio": bench["mean_candidate_ratio"],
+        })
+    except Exception as e:
+        print(f"Benchmark warning: {e}")
+
+    # generate predictions with fine model as single-stage fallback output
+    print("Generating SlowFast predictions on validation split...")
+    pred_dir = os.path.join(args.output_dir, "predictions")
     generate_predictions(
         model=model, match_dirs=val_dirs, match_ids=val_ids,
-        output_dir=sf_pred_dir, device=args.device,
+        output_dir=pred_dir,
+        feature_files=("1_ResNET_TF2_PCA512.npy", "2_ResNET_TF2_PCA512.npy"),
+        window_size=80, stride=40, nms_window=30,
+        confidence_threshold=0.2, framerate=2, device=args.device,
     )
-    sf_results = run_evaluation(args.data_dir, sf_pred_dir, split="valid")
-    sf_map = sf_results.get("a_mAP", 0.0)
 
-    # evaluate: two-stage pipeline
-    print("Running two-stage pipeline evaluation...")
-    coarse = TSMSpottingHead(
-        feat_dim=args.feat_dim, num_classes=17,
-        hidden_dim=PIPELINE_CONFIG["coarse_hidden_dim"],
-    ).to(args.device)
-    load_checkpoint(args.coarse_checkpoint, coarse)
+    print("Running SoccerNet evaluation...")
+    results = run_evaluation(args.data_dir, pred_dir, split="valid")
+    avg_map = results.get("a_mAP", 0.0)
+    print(f"\nSlowFast mAP Results:\n  avg-mAP tight: {avg_map:.1f}%")
+    wandb.log({"eval/avg_mAP_tight": avg_map})
 
-    pipeline = TwoStagePipeline(coarse, model, PIPELINE_CONFIG, device=args.device)
-
-    # generate two-stage predictions
-    from src.models.temporal.postprocess import save_predictions
-    ts_pred_dir = os.path.join(args.output_dir, "predictions_twostage")
-    for match_dir, match_id in zip(val_dirs, val_ids):
-        h1 = np.load(os.path.join(match_dir, "1_ResNET_TF2_PCA512.npy"))
-        h2 = np.load(os.path.join(match_dir, "2_ResNET_TF2_PCA512.npy"))
-        preds = pipeline.run(torch.FloatTensor(h1), torch.FloatTensor(h2))
-        out_path = os.path.join(ts_pred_dir, match_id)
-        os.makedirs(out_path, exist_ok=True)
-        save_predictions(preds, os.path.join(out_path, "results_spotting.json"))
-
-    ts_results = run_evaluation(args.data_dir, ts_pred_dir, split="valid")
-    ts_map = ts_results.get("a_mAP", 0.0)
-
-    # benchmark latency
-    print("Benchmarking latency...")
-    bench_features = torch.randn(1000, args.feat_dim)
-    bench = benchmark_pipeline(coarse, model, bench_features, PIPELINE_CONFIG,
-                               device=args.device, num_runs=5, warmup=2)
-
-    # print results table
-    print(f"\n{'Mode':<15} {'avg-mAP tight':>14} {'ms/frame':>10} {'Speedup':>9}")
-    print("-" * 50)
-    tsm_ms = bench["single_stage_ms"] / 1000
-    sf_ms = tsm_ms * 1.5  # rough estimate for SlowFast
-    ts_ms = bench["two_stage_ms"] / 1000
-    print(f"{'TSM single':<15} {'N/A':>14} {tsm_ms:>9.2f}ms {'1.0x':>9}")
-    print(f"{'SlowFast':<15} {sf_map:>13.1f}% {sf_ms:>9.2f}ms {'--':>9}")
-    print(f"{'Two-stage':<15} {ts_map:>13.1f}% {ts_ms:>9.2f}ms {bench['speedup_factor']:>8.1f}x")
-
-    wandb.log({
-        "eval/slowfast_mAP": sf_map,
-        "eval/twostage_mAP": ts_map,
-        "eval/speedup_factor": bench["speedup_factor"],
-        "eval/candidate_ratio": bench["candidate_ratio"],
-    })
     wandb.finish()
     print("Done.")
 

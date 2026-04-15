@@ -16,16 +16,12 @@ class ChunkedSoccerNetDataset(Dataset):
     """
     def __init__(self, matches, chunk_size=40, event_ratio=0.7,
                  num_classes=17, framerate=2, feat_dim=512):
-        self.matches = []        # list of (features_np, normalized_annotations)
+        self.matches = matches        # list of (features_np, annotations)
         self.chunk_size = chunk_size
         self.event_ratio = event_ratio
         self.num_classes = num_classes
         self.framerate = framerate
         self.feat_dim = feat_dim
-
-        for feats, anns in matches:
-            normalized = self._iter_annotations(anns)
-            self.matches.append((feats, normalized))
 
         # pre-compute event frame indices per match for faster sampling
         self._event_frames = []
@@ -69,10 +65,14 @@ class ChunkedSoccerNetDataset(Dataset):
         for ann in annotations:
             frame = self._parse_gametime(ann)
             local = frame - start
-            if 0 <= local < self.chunk_size:
-                label = ann.get("label", "")
-                if label in EVENT_DICTIONARY_V2:
-                    targets[local] = EVENT_DICTIONARY_V2[label] + 1
+            
+            # WIDEN THE TARGET FOR COARSE DETECTION 
+            # (Applies label to +/- 2 frames around the exact timestamp)
+            for offset in range(-2, 3):
+                if 0 <= local + offset < self.chunk_size:
+                    label = ann.get("label", "")
+                    if label in EVENT_DICTIONARY_V2:
+                        targets[local + offset] = EVENT_DICTIONARY_V2[label] + 1
 
         return {
             "features": torch.FloatTensor(chunk),
@@ -81,46 +81,8 @@ class ChunkedSoccerNetDataset(Dataset):
 
     def _parse_gametime(self, event):
         """Convert 'H - MM:SS' gameTime string to frame index."""
-        if not isinstance(event, dict):
-            return -1
-
         game_time = event.get("gameTime", "1 - 00:00")
-        if not isinstance(game_time, str):
-            return -1
-
         parts = game_time.split(" - ")
         time_str = parts[1] if len(parts) > 1 else parts[0]
-        try:
-            minutes, seconds = map(int, time_str.split(":"))
-        except (ValueError, TypeError):
-            return -1
-
+        minutes, seconds = map(int, time_str.split(":"))
         return self.framerate * (minutes * 60 + seconds)
-
-    def _iter_annotations(self, annotations):
-        """Normalize annotation container to a flat list of event dicts."""
-        if isinstance(annotations, dict):
-            events = annotations.values()
-        elif isinstance(annotations, list):
-            events = annotations
-        else:
-            return []
-
-        normalized = []
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-
-            if "imageMetadata" in event and isinstance(event["imageMetadata"], dict):
-                meta = event["imageMetadata"]
-                normalized.append({
-                    "gameTime": meta.get("gameTime", "1 - 00:00"),
-                    "label": meta.get("label", ""),
-                })
-            else:
-                normalized.append({
-                    "gameTime": event.get("gameTime", "1 - 00:00"),
-                    "label": event.get("label", ""),
-                })
-
-        return normalized

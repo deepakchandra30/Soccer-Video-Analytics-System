@@ -19,6 +19,7 @@ from src.training.trainer import (
 )
 from src.evaluation.predict import generate_predictions
 from src.evaluation.evaluate import run_evaluation
+from src.models.temporal.losses import get_class_weights, FocalLoss
 
 
 def load_matches(data_dir, split, feature_type="pca512"):
@@ -118,8 +119,8 @@ def main():
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
-    weights = get_class_weights(TSM_CONFIG["num_classes"], TSM_CONFIG["bg_weight"])
-    criterion = torch.nn.CrossEntropyLoss(weight=weights.to(args.device))
+    weights = get_class_weights(TSM_CONFIG["num_classes"], bg_weight=0.01)
+    criterion = FocalLoss(alpha=weights.to(args.device), gamma=2.0)
 
     early_stop = EarlyStopping(patience=TSM_CONFIG["patience"], mode="min")
 

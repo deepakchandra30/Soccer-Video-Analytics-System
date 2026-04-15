@@ -71,3 +71,4 @@ tests/
 .pytest_cache/
 outputs/
 tests/
+outputs_old/
