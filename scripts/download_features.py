@@ -11,20 +11,27 @@ from src.data.downloader import download_features, download_video
 def main():
     parser = argparse.ArgumentParser(description="Download SoccerNet data")
     parser.add_argument("--splits", nargs="+", default=["train", "valid", "test"])
-    parser.add_argument("--local-dir", "--data-dir", dest="local_dir", default="data/")
+    parser.add_argument("--local-dir", default="data/")
+    parser.add_argument(
+        "--features",
+        default="pca512",
+        choices=["pca512", "resnet50", "baidu"],
+        help="Which feature set to download. 'baidu' is the 8576-dim 2021-challenge "
+             "embedding (~50GB/split, biggest mAP lift). Default: pca512.",
+    )
     parser.add_argument("--video", action="store_true", help="Also download match videos (requires NDA password)")
     parser.add_argument("--password", default="", help="SoccerNet NDA password for video downloads")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     if args.dry_run:
-        print(f"Would download splits {args.splits} to {args.local_dir}")
+        print(f"Would download {args.features} features for splits {args.splits} to {args.local_dir}")
         if args.video:
             print("Would also download videos")
         return
 
-    print(f"Downloading features for {args.splits} into {args.local_dir}...")
-    download_features(local_directory=args.local_dir, splits=args.splits)
+    print(f"Downloading {args.features} features for {args.splits} into {args.local_dir}...")
+    download_features(local_directory=args.local_dir, splits=args.splits, features=args.features)
     print("Features done.")
 
     if args.video:

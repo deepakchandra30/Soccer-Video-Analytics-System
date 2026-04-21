@@ -65,10 +65,8 @@ experiments/*.log
 
 
 # Misc
-dashboard/
 docs/
-tests/
 .pytest_cache/
 outputs/
 tests/
-outputs_old/
+old/

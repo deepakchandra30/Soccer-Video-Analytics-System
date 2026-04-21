@@ -56,7 +56,9 @@ class TwoStagePipeline:
         N = features.shape[0]
 
         for pred in raw_preds:
-            center_frame = int(pred["position"] * framerate / 1000)
+            # nms_detections returns position as a string (SoccerNet evaluator
+            # contract — see postprocess.py). Cast back to int for arithmetic.
+            center_frame = int(int(pred["position"]) * framerate / 1000)
             start = max(0, center_frame - pad)
             end = min(N, center_frame + pad)
             candidates.append({
@@ -93,20 +95,19 @@ class TwoStagePipeline:
                 pad = torch.zeros(pad_size, window.shape[1])
                 window = torch.cat([window, pad], dim=0)
 
-            # ensure length is divisible by slow_stride (4)
-            remainder = window.shape[0] % 4
-            if remainder != 0:
-                pad_size = 4 - remainder
-                pad = torch.zeros(pad_size, window.shape[1])
-                window = torch.cat([window, pad], dim=0)
+            # SlowFast internally handles any T >= 1 via F.interpolate of its
+            # slow pathway. No divisibility-by-slow_stride padding needed.
 
             with torch.no_grad():
                 inp = window.unsqueeze(0).to(self.device)
-                logits = self.fine(inp)  # (1, T//4, 18)
+                # SlowFast now outputs at full T (was T/slow_stride). See the
+                # 2026-04-19 resolution fix in src/models/temporal/slowfast.py
+                # — outputs (1, T, num_classes+1).
+                logits = self.fine(inp)
                 probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
 
             # map fine model output back to event classes (skip background)
-            event_probs = probs[:, 1:]  # (T_out, 17)
+            event_probs = probs[:, 1:]  # (T, 17)
 
             fine_preds = nms_detections(
                 event_probs,
@@ -116,13 +117,16 @@ class TwoStagePipeline:
                 half=half,
             )
 
-            # adjust positions: fine model predictions are relative to the window
-            stride = 4  # slow_stride
+            # adjust positions: fine predictions are frame-indexed relative to
+            # the window. SlowFast now outputs at full T so there's no stride
+            # multiplier — frames translate 1:1 back to the match timeline.
             for p in fine_preds:
-                # re-map from fine model frame index to global frame index
-                fine_frame = int(p["position"] * self.config.get("framerate", 2) / 1000)
-                global_frame = start + fine_frame * stride
-                p["position"] = int(global_frame * 1000 / self.config.get("framerate", 2))
+                # nms_detections emits position as a string (SoccerNet evaluator
+                # contract — see postprocess.py). Cast for arithmetic and
+                # re-emit as a string for save_predictions compatibility.
+                fine_frame = int(int(p["position"]) * self.config.get("framerate", 2) / 1000)
+                global_frame = start + fine_frame
+                p["position"] = str(int(global_frame * 1000 / self.config.get("framerate", 2)))
 
             refined.extend(fine_preds)
 

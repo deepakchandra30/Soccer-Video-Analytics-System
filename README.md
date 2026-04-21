@@ -39,12 +39,16 @@ python scripts/download_features.py --data-dir data/ --video --password YOUR_NDA
 
 ### Training
 
+Both training scripts log to Weights & Biases. If you don't have a W&B
+account, prefix the commands with `WANDB_MODE=offline` to write run logs
+locally without needing an API key:
+
 ```bash
 # train TSM baseline
-python -m src.training.train_tsm --data-dir data/ --output-dir outputs/tsm_baseline
+WANDB_MODE=offline python -m src.training.train_tsm --data-dir data/ --output-dir outputs/tsm_baseline
 
 # train SlowFast + two-stage evaluation
-python -m src.training.train_slowfast --data-dir data/ --output-dir outputs/slowfast \
+WANDB_MODE=offline python -m src.training.train_slowfast --data-dir data/ --output-dir outputs/slowfast \
   --coarse-checkpoint outputs/tsm_baseline/best.pt
 
 # run ablation studies

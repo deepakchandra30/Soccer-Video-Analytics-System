@@ -12,24 +12,34 @@ from tqdm import tqdm
 from config.seeds import set_seeds
 from config.tsm_config import TSM_CONFIG
 from src.models.temporal.tsm import TSMSpottingHead
-from src.models.temporal.losses import get_class_weights
+from src.models.temporal.losses import (
+    get_class_weights, compute_class_weights_from_matches,
+)
 from src.data.chunked_dataset import ChunkedSoccerNetDataset
 from src.training.trainer import (
     train_epoch, validate_epoch, EarlyStopping, save_checkpoint,
 )
 from src.evaluation.predict import generate_predictions
 from src.evaluation.evaluate import run_evaluation
-from src.models.temporal.losses import get_class_weights, FocalLoss
 
 
 def load_matches(data_dir, split, feature_type="pca512"):
-    """Load all match features and annotations for a split."""
+    """Load all match features and annotations for a split.
+
+    Prefers Labels-v2.json because it contains the full action spotting
+    label set (~200 annotations/game).  Labels-v3.json's ``actions`` field
+    only holds the subset of frames selected for the bbox/replay tasks
+    (~15/game locally), so training on it starves the model of positive
+    examples and sinks avg-mAP.  Labels-v3 is kept as a last-resort
+    fallback only so fixtures without v2 still load.
+    """
     from SoccerNet.utils import getListGames
     import json
 
     feat_map = {
         "pca512": ("1_ResNET_TF2_PCA512.npy", "2_ResNET_TF2_PCA512.npy"),
-        "resnet50": ("1_resnet50_2048.npy", "2_resnet50_2048.npy"),
+        "resnet50": ("1_ResNET_TF2.npy", "2_ResNET_TF2.npy"),
+        "baidu": ("1_baidu_soccer_embeddings.npy", "2_baidu_soccer_embeddings.npy"),
     }
     f1_name, f2_name = feat_map[feature_type]
     games = getListGames(split=split)
@@ -41,20 +51,44 @@ def load_matches(data_dir, split, feature_type="pca512"):
         game_dir = os.path.join(data_dir, game)
         f1_path = os.path.join(game_dir, f1_name)
         f2_path = os.path.join(game_dir, f2_name)
-        label_path = os.path.join(game_dir, "Labels-v2.json")
 
-        if not all(os.path.exists(p) for p in [f1_path, f2_path, label_path]):
+        if not all(os.path.exists(p) for p in [f1_path, f2_path]):
+            continue
+
+        # Prefer Labels-v2 (full action-spotting set); fall back to v3.
+        label_v2 = os.path.join(game_dir, "Labels-v2.json")
+        label_v3 = os.path.join(game_dir, "Labels-v3.json")
+
+        if os.path.exists(label_v2):
+            label_path = label_v2
+        elif os.path.exists(label_v3):
+            label_path = label_v3
+        else:
             continue
 
         half1 = np.load(f1_path)
         half2 = np.load(f2_path)
         features = np.concatenate([half1, half2], axis=0)
+        half1_len = half1.shape[0]
 
         with open(label_path) as f:
             labels = json.load(f)
-        annotations = labels.get("annotations", [])
 
-        matches.append((features, annotations))
+        # Labels-v3.json: ``actions`` is a dict {key: {imageMetadata: {...}}}
+        # Labels-v2.json: ``annotations`` is a list of dicts with gameTime/label
+        if "actions" in labels:
+            actions = labels["actions"]
+            if isinstance(actions, dict):
+                annotations = [v.get("imageMetadata", {}) for v in actions.values()]
+            else:
+                annotations = list(actions)
+        else:
+            annotations = labels.get("annotations", [])
+
+        # Returning half1_len is load-bearing: ChunkedSoccerNetDataset needs it
+        # to offset half-2 annotations to the correct index in the concatenated
+        # feature array. Without it, ~60% of events land at the wrong frame.
+        matches.append((features, annotations, half1_len))
         game_dirs.append(game_dir)
         game_ids.append(game)
 
@@ -78,7 +112,7 @@ def main():
     parser.add_argument("--device", default=None)
     parser.add_argument("--feat-dim", type=int, default=TSM_CONFIG["feat_dim"])
     parser.add_argument("--feature-type", default="pca512",
-                        choices=["pca512", "resnet50"])
+                        choices=["pca512", "resnet50", "baidu"])
     parser.add_argument("--wandb-project", default="soccer-analytics")
     args = parser.parse_args()
 
@@ -119,8 +153,18 @@ def main():
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
-    weights = get_class_weights(TSM_CONFIG["num_classes"], bg_weight=0.01)
-    criterion = FocalLoss(alpha=weights.to(args.device), gamma=2.0)
+    # Use per-class inverse-frequency weights derived from the actual train
+    # annotations. Uniform weights were undercounting rare classes (red card,
+    # penalty) during tight-mAP evaluation — each of those classes gets
+    # averaged into the final avg-mAP at weight 1/17, so a single zero-AP
+    # class costs ~5 points on its own.
+    weights = compute_class_weights_from_matches(
+        train_matches, num_classes=TSM_CONFIG["num_classes"],
+        bg_weight=TSM_CONFIG["bg_weight"],
+    )
+    print(f"Per-class weights: bg={weights[0]:.3f}, "
+          f"events min={weights[1:].min():.2f} max={weights[1:].max():.2f}")
+    criterion = torch.nn.CrossEntropyLoss(weight=weights.to(args.device))
 
     early_stop = EarlyStopping(patience=TSM_CONFIG["patience"], mode="min")
 
@@ -154,7 +198,8 @@ def main():
     print("Generating predictions on validation split...")
     feat_map = {
         "pca512": ("1_ResNET_TF2_PCA512.npy", "2_ResNET_TF2_PCA512.npy"),
-        "resnet50": ("1_resnet50_2048.npy", "2_resnet50_2048.npy"),
+        "resnet50": ("1_ResNET_TF2.npy", "2_ResNET_TF2.npy"),
+        "baidu": ("1_baidu_soccer_embeddings.npy", "2_baidu_soccer_embeddings.npy"),
     }
     pred_dir = os.path.join(args.output_dir, "predictions")
     generate_predictions(
@@ -166,24 +211,36 @@ def main():
         framerate=TSM_CONFIG["framerate"], device=args.device,
     )
 
-    # evaluate
+    # evaluate -- run_evaluation stubs missing predictions and skips
+    # games without Labels-v2.json so the SDK never hits FileNotFoundError.
     print("Running SoccerNet evaluation...")
     results = run_evaluation(args.data_dir, pred_dir, split="valid")
-    avg_map = results.get("a_mAP", 0.0)
 
-    # try to extract per-tolerance mAP
-    map_1s = results.get("a_mAP_per_class_at1", results.get("a_mAP_at1", None))
-    map_2s = results.get("a_mAP_per_class_at2", results.get("a_mAP_at2", None))
-    map_5s = results.get("a_mAP_per_class_at5", results.get("a_mAP_at5", None))
+    # SoccerNet's evaluator returns numpy scalars / arrays in [0, 1].
+    # The previous display of 0.0% was a formatting bug: the raw value
+    # 0.0047 (= 0.47%) was being passed to {:.1f}% which rounds to 0.0.
+    # Always coerce to float and multiply by 100 to get a percentage.
+    def _as_pct(v):
+        if v is None:
+            return None
+        try:
+            return float(v) * 100.0
+        except (TypeError, ValueError):
+            return None
+
+    avg_map = _as_pct(results.get("a_mAP", 0.0))
+    map_1s = _as_pct(results.get("a_mAP_per_class_at1", results.get("a_mAP_at1", None)))
+    map_2s = _as_pct(results.get("a_mAP_per_class_at2", results.get("a_mAP_at2", None)))
+    map_5s = _as_pct(results.get("a_mAP_per_class_at5", results.get("a_mAP_at5", None)))
 
     print(f"\nmAP Results:")
-    print(f"  avg-mAP tight: {avg_map:.1f}%")
+    print(f"  avg-mAP tight: {avg_map:.4f}%")
     if map_1s is not None:
-        print(f"  mAP@1s:        {map_1s:.1f}%")
+        print(f"  mAP@1s:        {map_1s:.4f}%")
     if map_2s is not None:
-        print(f"  mAP@2s:        {map_2s:.1f}%")
+        print(f"  mAP@2s:        {map_2s:.4f}%")
     if map_5s is not None:
-        print(f"  mAP@5s:        {map_5s:.1f}%")
+        print(f"  mAP@5s:        {map_5s:.4f}%")
 
     wandb.log({"eval/avg_mAP_tight": avg_map})
     if map_1s is not None:

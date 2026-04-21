@@ -13,34 +13,55 @@ class ChunkedSoccerNetDataset(Dataset):
     Implements event-centric sampling: most chunks are centered on annotated
     events so the model sees enough positive examples despite the extreme
     class imbalance (99%+ background frames).
+
+    Each match is a 3-tuple ``(features, annotations, half1_len)`` where
+    features is the concatenation of both halves along the time axis.  Frame
+    indices for half-2 annotations are offset by ``half1_len`` so targets
+    land at the correct position in the concatenated array.  Legacy
+    2-tuples are still accepted with a default offset of ``45*60*framerate``
+    but trigger a warning because real half lengths vary.
     """
     def __init__(self, matches, chunk_size=40, event_ratio=0.7,
                  num_classes=17, framerate=2, feat_dim=512):
-        self.matches = matches        # list of (features_np, annotations)
+        self.matches = []
+        for m in matches:
+            if len(m) == 3:
+                self.matches.append(m)
+            else:
+                feats, anns = m
+                default_half1 = 45 * 60 * framerate
+                print(f"[ChunkedSoccerNetDataset] WARNING: match supplied "
+                      f"without half1_len; assuming {default_half1} frames. "
+                      f"Half-2 events may be misaligned.")
+                self.matches.append((feats, anns, default_half1))
+
         self.chunk_size = chunk_size
         self.event_ratio = event_ratio
         self.num_classes = num_classes
         self.framerate = framerate
         self.feat_dim = feat_dim
 
-        # pre-compute event frame indices per match for faster sampling
+        # Precompute (concat_frame, class_index) pairs per match once.
+        # Using the concat index directly means __getitem__ never has to
+        # re-parse gameTime or worry about which half an event belongs to.
         self._event_frames = []
-        for feats, anns in self.matches:
+        for feats, anns, half1_len in self.matches:
             frames = []
             for ann in anns:
-                f = self._parse_gametime(ann)
-                if 0 <= f < feats.shape[0]:
-                    label = ann.get("label", "")
-                    if label in EVENT_DICTIONARY_V2:
-                        frames.append((f, EVENT_DICTIONARY_V2[label] + 1))
+                frame = self._ann_to_concat_frame(ann, half1_len)
+                if frame is None or not (0 <= frame < feats.shape[0]):
+                    continue
+                label = ann.get("label", "")
+                if label in EVENT_DICTIONARY_V2:
+                    frames.append((frame, EVENT_DICTIONARY_V2[label] + 1))
             self._event_frames.append(frames)
 
     def __len__(self):
-        return sum(f.shape[0] // self.chunk_size for f, _ in self.matches)
+        return sum(f.shape[0] // self.chunk_size for f, _, _ in self.matches)
 
     def __getitem__(self, idx):
         match_idx = idx % len(self.matches)
-        features, annotations = self.matches[match_idx]
+        features, _, _ = self.matches[match_idx]
         T = features.shape[0]
 
         # decide whether to sample around an event or randomly
@@ -60,29 +81,49 @@ class ChunkedSoccerNetDataset(Dataset):
                            dtype=np.float32)
             chunk = np.concatenate([chunk, pad])
 
-        # build frame-level targets
+        # build frame-level targets from precomputed (frame, class) pairs.
         targets = np.zeros(self.chunk_size, dtype=np.int64)
-        for ann in annotations:
-            frame = self._parse_gametime(ann)
+        for frame, cls in event_frames:
             local = frame - start
-            
-            # WIDEN THE TARGET FOR COARSE DETECTION 
-            # (Applies label to +/- 2 frames around the exact timestamp)
-            for offset in range(-2, 3):
-                if 0 <= local + offset < self.chunk_size:
-                    label = ann.get("label", "")
-                    if label in EVENT_DICTIONARY_V2:
-                        targets[local + offset] = EVENT_DICTIONARY_V2[label] + 1
+            if 0 <= local < self.chunk_size:
+                targets[local] = cls
 
         return {
             "features": torch.FloatTensor(chunk),
             "targets": torch.LongTensor(targets),
         }
 
-    def _parse_gametime(self, event):
-        """Convert 'H - MM:SS' gameTime string to frame index."""
-        game_time = event.get("gameTime", "1 - 00:00")
-        parts = game_time.split(" - ")
-        time_str = parts[1] if len(parts) > 1 else parts[0]
-        minutes, seconds = map(int, time_str.split(":"))
-        return self.framerate * (minutes * 60 + seconds)
+    def _ann_to_concat_frame(self, ann, half1_len):
+        """Frame index in the concatenated (half1 + half2) feature array.
+
+        Mirrors SoccerNet's own ``label2vector`` for within-half precision
+        (``position`` in ms when present, else ``gameTime`` seconds), then
+        adds ``half1_len`` for half-2 events so they index into the second
+        half of the concatenated array rather than colliding with half 1.
+        """
+        gt = str(ann.get("gameTime", ""))
+        if " - " in gt:
+            try:
+                half = int(gt.split(" - ")[0])
+            except ValueError:
+                half = int(ann.get("half", 1) or 1)
+        else:
+            half = int(ann.get("half", 1) or 1)
+
+        within_half = None
+        if "position" in ann:
+            try:
+                within_half = int(self.framerate * int(ann["position"]) / 1000)
+            except (TypeError, ValueError):
+                within_half = None
+        if within_half is None and " - " in gt:
+            try:
+                time_str = gt.split(" - ", 1)[1]
+                minutes, seconds = map(int, time_str.split(":"))
+                within_half = self.framerate * (minutes * 60 + seconds)
+            except (ValueError, IndexError):
+                return None
+        if within_half is None:
+            return None
+
+        return within_half + (0 if half == 1 else half1_len)

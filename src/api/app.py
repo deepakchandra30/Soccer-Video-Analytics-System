@@ -1,4 +1,5 @@
 """FastAPI application serving real SoccerNet data."""
+import asyncio
 import json
 import os
 import re
@@ -6,9 +7,9 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 app = FastAPI(title="Soccer Video Analytics API", version="3.0.0")
 
@@ -61,7 +62,18 @@ def _scan_matches():
         league = league_dir.name.replace("_", " ").replace("-", " ").title() if league_dir != DATA_DIR else ""
 
         has_features = (match_dir / "1_ResNET_TF2_PCA512.npy").exists()
-        has_video = (match_dir / "1_720p.mkv").exists()
+        # Guard against partial downloads: SoccerNet downloader writes
+        # directly to the destination path, so an in-progress 50 MB file
+        # would otherwise enable the Analyze button and crash the WebSocket
+        # processor when opencv tries to read past EOF. A complete 90-min
+        # half is ~1 GB; 200 MB is a safe lower bound.
+        first_half = match_dir / "1_720p.mkv"
+        second_half = match_dir / "2_720p.mkv"
+        has_video = (
+            first_half.exists() and second_half.exists()
+            and first_half.stat().st_size > 200 * 1024 * 1024
+            and second_half.stat().st_size > 200 * 1024 * 1024
+        )
 
         matches.append({
             "id": match_id,
@@ -133,106 +145,79 @@ def _load_feature_stats(match_id: str):
 
 
 def _load_tracks(match_id: str):
-    """Load tracking data from tracks.json or generate from features."""
+    """Load tracking data from tracks.json. Returns [] when not yet computed.
+
+    Bug-fix 2026-04-10: previously generated synthetic random-jittered
+    tracking dicts when tracks.json was missing, masking ML pipeline
+    failures behind realistic-looking fake data. Now returns an empty
+    list so the absence of real tracks is visible to clients.
+    """
     match_dir = _safe_match_dir(match_id)
-
-    # Try loading pre-computed tracks
     tracks_path = match_dir / "tracks.json"
-    if tracks_path.exists():
-        with open(tracks_path) as f:
-            return json.load(f)
-
-    # Generate synthetic tracks from feature frame count
-    stats = _load_feature_stats(match_id)
-    total_frames = stats["total_frames"]
-    if total_frames == 0:
+    if not tracks_path.exists():
         return []
-
-    rng = np.random.RandomState(42)
-    tracks = []
-    for i in range(total_frames):
-        n_players = rng.randint(5, 12)
-        players = []
-        for pid in range(n_players):
-            players.append({
-                "track_id": int(pid),
-                "bbox": [
-                    float(rng.uniform(0, 1600)),
-                    float(rng.uniform(0, 900)),
-                    float(rng.uniform(40, 80)),
-                    float(rng.uniform(60, 120)),
-                ],
-                "confidence": float(round(rng.uniform(0.5, 1.0), 3)),
-            })
-        tracks.append({
-            "frame_idx": i,
-            "players": players,
-        })
-    return tracks
+    with open(tracks_path) as f:
+        return json.load(f)
 
 
 def _generate_narrative(match_id: str, events):
-    """Generate a narrative summary from events."""
+    """Return a real LLM-generated narrative or 503 (no fake fallback).
+
+    Resolution order:
+      1. Pre-computed narrative.json on disk (offline cache).
+      2. Live OpenAI call when OPENAI_API_KEY is set.
+      3. HTTP 503 — explicitly NOT a hard-coded summary. The deterministic
+         "competitive match between..." string the client flagged on
+         2026-04-10 produced text that read like an LLM narrative without
+         any real grounding, which is worse than failing loudly.
+    """
     match_dir = _safe_match_dir(match_id)
 
-    # Try loading pre-computed narrative
     narrative_path = match_dir / "narrative.json"
     if narrative_path.exists():
         with open(narrative_path) as f:
             return json.load(f)
 
-    # Generate from events
-    key_moments = []
-    for e in events:
-        key_moments.append({
-            "timestamp_ms": e["position"],
-            "event_type": e["label"],
-            "description": f"{e['label']} at {e.get('game_time', 'unknown time')} by {e.get('team', 'unknown team')}",
-        })
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "narrative_service_unavailable",
+                "reason": "OPENAI_API_KEY is not configured and no narrative.json is cached.",
+                "hint": "Set OPENAI_API_KEY in the environment, or place a narrative.json next to Labels-v3.json.",
+            },
+        )
 
-    # Build player contributions from event teams
-    team_counts = {}
-    for e in events:
-        team = e.get("team", "Unknown") or "Unknown"
-        team_counts[team] = team_counts.get(team, 0) + 1
+    try:
+        from openai import OpenAI
 
-    player_contributions = []
-    for pid, (team, count) in enumerate(team_counts.items()):
-        player_contributions.append({
-            "player_id": pid,
-            "screen_time_seconds": float(count * 30),
-            "events_involved": count,
-            "summary": f"{team} was involved in {count} event(s)",
-        })
-
-    goals = [e for e in events if e["label"].lower() == "goal"]
-    fouls = [e for e in events if e["label"].lower() == "foul"]
-
-    tactical_breakdown = [
-        {
-            "topic": "Attacking play",
-            "observation": f"{len(goals)} goal(s) scored during the match",
-        },
-        {
-            "topic": "Discipline",
-            "observation": f"{len(fouls)} foul(s) committed",
-        },
-    ]
-
-    teams = list(team_counts.keys())
-    team_str = " vs ".join(teams[:2]) if len(teams) >= 2 else "the teams"
-    match_summary = (
-        f"A competitive match between {team_str} "
-        f"featuring {len(events)} notable events including "
-        f"{len(goals)} goal(s) and {len(fouls)} foul(s)."
-    )
-
-    return {
-        "match_summary": match_summary,
-        "key_moments": key_moments,
-        "player_contributions": player_contributions,
-        "tactical_breakdown": tactical_breakdown,
-    }
+        client = OpenAI(api_key=api_key)
+        prompt = (
+            "Summarise this football match. Every claim must come from the events list. "
+            "Return JSON with keys: match_summary, key_moments, player_contributions, tactical_breakdown. "
+            f"Events: {json.dumps(events)}"
+        )
+        response = client.chat.completions.create(
+            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[
+                {"role": "system", "content": "You are a football analyst. Reply with JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+        )
+        return json.loads(response.choices[0].message.content)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "narrative_service_unavailable",
+                "reason": f"LLM call failed: {type(exc).__name__}",
+            },
+        )
 
 
 @app.get("/matches")
@@ -249,13 +234,13 @@ def get_events(match_id: str):
 
 
 @app.get("/matches/{match_id:path}/tracks")
-def get_tracks(match_id: str, stride: int = Query(1, ge=1)):
+async def get_tracks(match_id: str, stride: int = Query(1, ge=1)):
     """Return per-frame tracking data with optional stride for downsampling."""
     match_dir = _safe_match_dir(match_id)
     if not match_dir.exists():
         raise HTTPException(404, f"Match not found: {match_id}")
 
-    tracks = _load_tracks(match_id)
+    tracks = await asyncio.to_thread(_load_tracks, match_id)
     if stride > 1:
         tracks = tracks[::stride]
     return tracks
@@ -311,14 +296,14 @@ def get_analytics(match_id: str):
 
 
 @app.get("/matches/{match_id:path}/narratives")
-def get_narratives(match_id: str):
-    """Return LLM-generated match narrative."""
+async def get_narratives(match_id: str):
+    """Return real LLM-generated match narrative or 503 (never a fake heuristic)."""
     match_dir = _safe_match_dir(match_id)
     if not match_dir.exists():
         raise HTTPException(404, f"Match not found: {match_id}")
 
-    events = _load_events(match_id)
-    return _generate_narrative(match_id, events)
+    events = await asyncio.to_thread(_load_events, match_id)
+    return await asyncio.to_thread(_generate_narrative, match_id, events)
 
 
 @app.get("/matches/{match_id:path}/timeline")
@@ -342,8 +327,16 @@ def get_timeline(match_id: str):
 
 
 @app.get("/video/{match_id:path}")
-def get_video(match_id: str, half: int = Query(1, ge=1, le=2)):
-    """Serve match video. Half defaults to 1 if not specified."""
+async def get_video(match_id: str, request: Request, half: int = Query(1, ge=1, le=2)):
+    """Serve match video with HTTP Range support for seeking/scrubbing.
+
+    Bug-fix 2026-04-10: previously returned a plain FileResponse with
+    just an Accept-Ranges header attached, which never produces 206
+    Partial Content responses. The browser's <video> element needs proper
+    206 + Content-Range to seek through the stream. This handler now
+    parses the Range header per RFC 7233 and streams the requested byte
+    slice back as 206; absence of Range falls back to full-file 200.
+    """
     match_dir = _safe_match_dir(match_id)
     if not match_dir.exists():
         raise HTTPException(404, f"Match not found: {match_id}")
@@ -353,11 +346,67 @@ def get_video(match_id: str, half: int = Query(1, ge=1, le=2)):
     if not video_path.exists():
         raise HTTPException(404, f"Video not available: {video_file}")
 
-    return FileResponse(str(video_path), media_type="video/x-matroska",
-                        headers={"Accept-Ranges": "bytes"})
+    file_size = video_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if not range_header:
+        return FileResponse(
+            str(video_path),
+            media_type="video/x-matroska",
+            headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
+        )
+
+    range_spec = range_header.strip().replace("bytes=", "")
+    if range_spec.startswith("-"):
+        suffix_length = int(range_spec[1:])
+        start = max(0, file_size - suffix_length)
+        end = file_size - 1
+    else:
+        parts = range_spec.split("-", 1)
+        start = int(parts[0])
+        end = int(parts[1]) if len(parts) > 1 and parts[1] else file_size - 1
+
+    if start >= file_size or start < 0 or end < start:
+        raise HTTPException(
+            status_code=416,
+            detail="Range Not Satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+
+    end = min(end, file_size - 1)
+    chunk_size = end - start + 1
+
+    def iter_range():
+        with open(video_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                read_size = min(65536, remaining)
+                data = f.read(read_size)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(
+        iter_range(),
+        status_code=206,
+        media_type="video/x-matroska",
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+        },
+    )
 
 
 @app.get("/health")
-def health_check():
-    match_count = len(_scan_matches())
-    return {"status": "ok", "version": "3.0.0", "matches": match_count, "realtime": True}
+async def health_check():
+    """Cheap health check — never triggers a filesystem scan.
+
+    Bug-fix 2026-04-10: previously called _scan_matches() which rglob'd the
+    entire DATA_DIR on every hit. Synchronous + heavy = blocked the event
+    loop for every other client. Now returns a constant payload; the
+    /matches endpoint exists for the (more expensive) full scan.
+    """
+    return {"status": "ok", "version": app.version, "realtime": True}
