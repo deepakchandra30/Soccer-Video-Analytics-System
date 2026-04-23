@@ -31,10 +31,10 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # download SoccerNet features (no NDA needed)
-python scripts/download_features.py --data-dir data/
+python scripts/download_features.py --local-dir data/
 
 # download videos (NDA required)
-python scripts/download_features.py --data-dir data/ --video --password YOUR_NDA_PASSWORD
+python scripts/download_features.py --local-dir data/ --video --password YOUR_NDA_PASSWORD
 ```
 
 ### Training
@@ -55,6 +55,22 @@ WANDB_MODE=offline python -m src.training.train_slowfast --data-dir data/ --outp
 python scripts/run_ablation.py --data-dir data/ --output-dir outputs/ablation \
   --checkpoints-dir outputs/ --experiments all
 ```
+
+### Reproducing the Headline mAP
+
+The three training commands above each report a single-model score
+(~32% TSM, ~41% SlowFast). The project's headline tight avg-mAP is the
+**ensemble** of both models, produced by `scripts/run_ensemble.py`. A single
+orchestrator runs all three stages in the right order with the flags that
+produced the number in `outputs/map_results.txt`:
+
+```bash
+python scripts/run_full_pipeline.py --data-dir data/
+```
+
+The script skips any training stage whose `best.pt` already exists, so
+ensemble-only re-runs are fast. Pass `--force-retrain` to retrain both models
+from scratch.
 
 ### Tracking
 

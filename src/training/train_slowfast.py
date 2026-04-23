@@ -37,10 +37,17 @@ def main():
     parser.add_argument("--batch-size", type=int, default=SLOWFAST_CONFIG["batch_size"])
     parser.add_argument("--lr", type=float, default=SLOWFAST_CONFIG["lr"])
     parser.add_argument("--device", default=None)
-    parser.add_argument("--feat-dim", type=int, default=SLOWFAST_CONFIG["feat_dim"])
+    parser.add_argument("--feat-dim", type=int, default=None)
     parser.add_argument("--feature-type", default="pca512",
                         choices=["pca512", "resnet50", "baidu"])
     parser.add_argument("--wandb-project", default="soccer-analytics")
+    # Submission-only: merge an extra labelled split into training data.
+    # Default None preserves existing train-on-train-only behaviour exactly.
+    parser.add_argument("--extra-train-split", default=None,
+                        choices=[None, "valid", "test"],
+                        help="Optionally merge another split into training. Use "
+                             "'valid' for challenge-submission retrains; the "
+                             "loader will then validate on 'test'.")
     args = parser.parse_args()
 
     feat_map = {
@@ -52,6 +59,9 @@ def main():
 
     if args.device is None:
         args.device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.feat_dim is None:
+        _FEAT_DIMS = {"pca512": 512, "resnet50": 2048, "baidu": 8576}
+        args.feat_dim = _FEAT_DIMS[args.feature_type]
 
     set_seeds(42)
     os.makedirs(args.output_dir, exist_ok=True)
@@ -59,22 +69,38 @@ def main():
     # load data
     print(f"Loading {args.feature_type} features from {args.data_dir}...")
     train_matches, _, _ = load_matches(args.data_dir, "train", args.feature_type)
-    val_matches, val_dirs, val_ids = load_matches(args.data_dir, "valid", args.feature_type)
-    print(f"  train: {len(train_matches)} matches, valid: {len(val_matches)} matches")
+    val_split_name = "test" if args.extra_train_split == "valid" else "valid"
+    val_matches, val_dirs, val_ids = load_matches(
+        args.data_dir, val_split_name, args.feature_type,
+    )
+    if args.extra_train_split:
+        extra_matches, _, _ = load_matches(
+            args.data_dir, args.extra_train_split, args.feature_type,
+        )
+        train_matches = train_matches + extra_matches
+        print(f"  merged extra split '{args.extra_train_split}' "
+              f"({len(extra_matches)} matches) into training data.")
+    print(f"  train: {len(train_matches)} matches, "
+          f"valid-on-{val_split_name}: {len(val_matches)} matches")
 
-    # datasets -- larger chunks for SlowFast
+    # datasets -- larger chunks for SlowFast. Framerate MUST match feature
+    # extraction rate (Baidu=1fps, PCA/ResNet=2fps) or annotations misalign.
+    from src.training.train_tsm import FEATURE_FRAMERATE as _FR
+    _framerate = _FR.get(args.feature_type, 2)
     train_ds = ChunkedSoccerNetDataset(
         train_matches, chunk_size=SLOWFAST_CONFIG["chunk_size"],
-        event_ratio=0.7, feat_dim=args.feat_dim,
+        event_ratio=0.7, feat_dim=args.feat_dim, framerate=_framerate,
     )
     val_ds = ChunkedSoccerNetDataset(
         val_matches, chunk_size=SLOWFAST_CONFIG["chunk_size"],
-        event_ratio=0.0, feat_dim=args.feat_dim,
+        event_ratio=0.0, feat_dim=args.feat_dim, framerate=_framerate,
     )
     train_loader = DataLoader(train_ds, batch_size=args.batch_size,
-                              shuffle=True, collate_fn=collate_fn, num_workers=0)
+                              shuffle=True, collate_fn=collate_fn,
+                              num_workers=4, pin_memory=True, persistent_workers=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size,
-                            shuffle=False, collate_fn=collate_fn, num_workers=0)
+                            shuffle=False, collate_fn=collate_fn,
+                            num_workers=2, pin_memory=True, persistent_workers=True)
 
     # model, optimizer, loss
     model = SlowFastSpotting(
@@ -131,12 +157,15 @@ def main():
     # evaluate: SlowFast single-stage
     print("\nGenerating SlowFast single-stage predictions...")
     sf_pred_dir = os.path.join(args.output_dir, "predictions_slowfast")
+    from src.training.train_tsm import FEATURE_SCALE as _FS
+    _scale = _FS.get(args.feature_type, 1.0)
     generate_predictions(
         model=model, match_dirs=val_dirs, match_ids=val_ids,
         output_dir=sf_pred_dir, device=args.device,
         feature_files=(f1_name, f2_name),
+        feature_scale=_scale, framerate=_framerate,
     )
-    sf_results = run_evaluation(args.data_dir, sf_pred_dir, split="valid")
+    sf_results = run_evaluation(args.data_dir, sf_pred_dir, split=val_split_name)
     # SoccerNet's evaluator returns mAP as a numpy scalar in [0, 1]; convert to
     # percent for display + wandb so the printed "0.3%" doesn't conceal a real
     # 26.3% (same root cause as the TSM display fix in commit 94400ee).
@@ -156,14 +185,14 @@ def main():
     from src.models.temporal.postprocess import save_predictions
     ts_pred_dir = os.path.join(args.output_dir, "predictions_twostage")
     for match_dir, match_id in zip(val_dirs, val_ids):
-        h1 = np.load(os.path.join(match_dir, f1_name))
-        h2 = np.load(os.path.join(match_dir, f2_name))
+        h1 = np.load(os.path.join(match_dir, f1_name)).astype(np.float32) * _scale
+        h2 = np.load(os.path.join(match_dir, f2_name)).astype(np.float32) * _scale
         preds = pipeline.run(torch.FloatTensor(h1), torch.FloatTensor(h2))
         out_path = os.path.join(ts_pred_dir, match_id)
         os.makedirs(out_path, exist_ok=True)
         save_predictions(preds, os.path.join(out_path, "results_spotting.json"))
 
-    ts_results = run_evaluation(args.data_dir, ts_pred_dir, split="valid")
+    ts_results = run_evaluation(args.data_dir, ts_pred_dir, split=val_split_name)
     ts_map = float(ts_results.get("a_mAP", 0.0)) * 100.0
 
     # benchmark latency

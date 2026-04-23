@@ -16,7 +16,8 @@ def generate_predictions(model, match_dirs, match_ids, output_dir,
                          feature_files=("1_ResNET_TF2_PCA512.npy",
                                         "2_ResNET_TF2_PCA512.npy"),
                          window_size=40, stride=20, nms_window=15,
-                         confidence_threshold=0.2, framerate=2, device="cpu"):
+                         confidence_threshold=0.2, framerate=2, device="cpu",
+                         feature_scale=1.0):
     """Run inference on all matches and write results_spotting.json per match.
 
     Args:
@@ -42,6 +43,8 @@ def generate_predictions(model, match_dirs, match_ids, output_dir,
         for half_idx, fname in enumerate([f1_name, f2_name], start=1):
             fpath = match_dir / fname
             features = np.load(str(fpath))
+            if feature_scale != 1.0:
+                features = (features.astype(np.float32) * feature_scale)
             features_t = torch.FloatTensor(features)
 
             scores = sliding_window_inference(
