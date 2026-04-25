@@ -68,6 +68,5 @@ experiments/*.log
 docs/
 .pytest_cache/
 outputs/
-tests/
 scripts/
 old/
