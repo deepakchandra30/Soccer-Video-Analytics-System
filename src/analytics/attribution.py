@@ -36,7 +36,7 @@ def attribute_events_to_players(events, tracks, proximity_threshold=5.0,
         event_copy["attribution_distance"] = None
 
         # convert event position (ms) to approximate frame index
-        event_ms = event["position"]
+        event_ms = float(event["position"])
         event_frame = int(event_ms * framerate / 1000)
 
         # search in a small window around the event frame

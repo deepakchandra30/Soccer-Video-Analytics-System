@@ -57,8 +57,13 @@ def benchmark_latency(model, features, device="cpu", num_runs=100, warmup=10):
 
 
 def benchmark_pipeline(coarse_model, fine_model, features, pipeline_config,
-                        device="cpu", num_runs=10, warmup=2):
+                        *, framerate, device="cpu", num_runs=10, warmup=2):
     """Compare single-stage vs two-stage latency.
+
+    ``framerate`` is required (keyword-only) for the same reason it is
+    required on TwoStagePipeline: PCA-512 / ResNet-50 are 2fps, Baidu is 1fps,
+    and choosing the wrong one writes prediction positions at the wrong time
+    so tight-mAP collapses to ~1%. Pass 2 for PCA / ResNet, 1 for Baidu.
 
     Returns dict with single_stage_ms, two_stage_ms, speedup_factor,
     and candidate_ratio.
@@ -70,7 +75,7 @@ def benchmark_pipeline(coarse_model, fine_model, features, pipeline_config,
 
     # two-stage: run pipeline to measure actual candidate ratio
     pipeline = TwoStagePipeline(coarse_model, fine_model, pipeline_config,
-                                device=device)
+                                framerate=framerate, device=device)
     half_len = T // 2
     half1 = features[:half_len]
     half2 = features[half_len:]

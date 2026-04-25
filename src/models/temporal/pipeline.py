@@ -16,11 +16,25 @@ class TwoStagePipeline:
 
     Stage 2 (SlowFast): re-classifies only the candidate windows at higher
     temporal resolution for better precision.
+
+    ``framerate`` is a required keyword-only argument because PIPELINE_CONFIG
+    cannot know it: PCA-512 / ResNet-50 ship at 2fps but Baidu ships at 1fps,
+    and picking the wrong one writes every prediction position at 2x (or 1/2x)
+    the true time. The SoccerNet evaluator then fails to match any prediction
+    to its label and tight-mAP collapses to the ~1% noise floor — exactly the
+    regression we hit on 2026-04-24 before making this parameter mandatory.
     """
-    def __init__(self, coarse_model, fine_model, config, device="cpu"):
+    def __init__(self, coarse_model, fine_model, config, *, framerate,
+                 device="cpu"):
+        if not isinstance(framerate, (int, float)) or framerate <= 0:
+            raise ValueError(
+                f"framerate must be a positive number, got {framerate!r}. "
+                f"Pass 2 for PCA-512 / ResNet-50 features, 1 for Baidu."
+            )
         self.coarse = coarse_model
         self.fine = fine_model
         self.config = config
+        self.framerate = framerate
         self.device = device
         self._candidate_frame_count = 0
 
@@ -45,20 +59,19 @@ class TwoStagePipeline:
             scores,
             nms_window=self.config["coarse_nms_window"],
             confidence_threshold=self.config["coarse_confidence_threshold"],
-            framerate=self.config.get("framerate", 2),
+            framerate=self.framerate,
             half=half,
         )
 
         # convert predictions back to candidate windows around each detection
         candidates = []
-        framerate = self.config.get("framerate", 2)
         pad = self.config.get("fine_pad_frames", 20)
         N = features.shape[0]
 
         for pred in raw_preds:
             # nms_detections returns position as a string (SoccerNet evaluator
             # contract — see postprocess.py). Cast back to int for arithmetic.
-            center_frame = int(int(pred["position"]) * framerate / 1000)
+            center_frame = int(int(pred["position"]) * self.framerate / 1000)
             start = max(0, center_frame - pad)
             end = min(N, center_frame + pad)
             candidates.append({
@@ -113,7 +126,7 @@ class TwoStagePipeline:
                 event_probs,
                 nms_window=self.config["fine_nms_window"],
                 confidence_threshold=self.config["fine_confidence_threshold"],
-                framerate=self.config.get("framerate", 2),
+                framerate=self.framerate,
                 half=half,
             )
 
@@ -124,9 +137,18 @@ class TwoStagePipeline:
                 # nms_detections emits position as a string (SoccerNet evaluator
                 # contract — see postprocess.py). Cast for arithmetic and
                 # re-emit as a string for save_predictions compatibility.
-                fine_frame = int(int(p["position"]) * self.config.get("framerate", 2) / 1000)
+                fine_frame = int(int(p["position"]) * self.framerate / 1000)
                 global_frame = start + fine_frame
-                p["position"] = str(int(global_frame * 1000 / self.config.get("framerate", 2)))
+                global_ms = int(global_frame * 1000 / self.framerate)
+                p["position"] = str(global_ms)
+                # gameTime was emitted by nms_detections at within-window time;
+                # rewrite it to match the globalised position so the JSON is
+                # self-consistent (the SoccerNet evaluator falls back to
+                # gameTime when position is missing — see label2vector).
+                gt_seconds = global_ms // 1000
+                p["gameTime"] = (
+                    f"{half} - {gt_seconds // 60:02d}:{gt_seconds % 60:02d}"
+                )
 
             refined.extend(fine_preds)
 

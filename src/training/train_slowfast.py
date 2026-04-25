@@ -24,7 +24,8 @@ from src.training.trainer import (
 from src.training.train_tsm import load_matches, collate_fn
 from src.evaluation.predict import generate_predictions
 from src.evaluation.evaluate import run_evaluation
-from src.evaluation.benchmark import benchmark_pipeline
+from src.evaluation.benchmark import benchmark_pipeline, benchmark_latency
+from config.tsm_config import TSM_CONFIG
 
 
 def main():
@@ -48,6 +49,14 @@ def main():
                         help="Optionally merge another split into training. Use "
                              "'valid' for challenge-submission retrains; the "
                              "loader will then validate on 'test'.")
+    # Eval-only rerun: reuse an existing best.pt from --output-dir and jump
+    # straight to the prediction + evaluation blocks. Lets a downstream user
+    # iterate on NMS / threshold / two-stage params without spending the 2-4h
+    # of GPU time to retrain an identical SlowFast head. Default False
+    # preserves the train-then-eval behaviour exactly.
+    parser.add_argument("--skip-training", action="store_true",
+                        help="Reuse best.pt from --output-dir; only run "
+                             "prediction + evaluation + benchmarking.")
     args = parser.parse_args()
 
     feat_map = {
@@ -132,27 +141,36 @@ def main():
     wandb.init(project=args.wandb_project, name="slowfast-training",
                config={**SLOWFAST_CONFIG, "feat_dim": args.feat_dim})
 
-    # train SlowFast
-    best_val_loss = float("inf")
-    for epoch in range(1, args.epochs + 1):
-        train_loss = train_epoch(model, train_loader, optimizer, criterion,
-                                 args.device)
-        val_loss = validate_epoch(model, val_loader, criterion, args.device)
-        scheduler.step()
+    # train SlowFast (or skip and reuse existing checkpoint for eval-only runs)
+    if args.skip_training:
+        ckpt_path = os.path.join(args.output_dir, "best.pt")
+        if not os.path.exists(ckpt_path):
+            raise FileNotFoundError(
+                f"--skip-training requires an existing checkpoint at {ckpt_path}."
+            )
+        load_checkpoint(ckpt_path, model)
+        print(f"Skipping training; loaded SlowFast checkpoint from {ckpt_path}")
+    else:
+        best_val_loss = float("inf")
+        for epoch in range(1, args.epochs + 1):
+            train_loss = train_epoch(model, train_loader, optimizer, criterion,
+                                     args.device)
+            val_loss = validate_epoch(model, val_loader, criterion, args.device)
+            scheduler.step()
 
-        wandb.log({"train/loss": train_loss, "val/loss": val_loss,
-                    "lr": scheduler.get_last_lr()[0], "epoch": epoch})
-        print(f"Epoch {epoch}/{args.epochs}  "
-              f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}")
+            wandb.log({"train/loss": train_loss, "val/loss": val_loss,
+                        "lr": scheduler.get_last_lr()[0], "epoch": epoch})
+            print(f"Epoch {epoch}/{args.epochs}  "
+                  f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}")
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            save_checkpoint(model, optimizer, epoch, val_loss,
-                            os.path.join(args.output_dir, "best.pt"))
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                save_checkpoint(model, optimizer, epoch, val_loss,
+                                os.path.join(args.output_dir, "best.pt"))
 
-        if early_stop.step(val_loss):
-            print(f"Early stopping at epoch {epoch}")
-            break
+            if early_stop.step(val_loss):
+                print(f"Early stopping at epoch {epoch}")
+                break
 
     # evaluate: SlowFast single-stage
     print("\nGenerating SlowFast single-stage predictions...")
@@ -171,15 +189,43 @@ def main():
     # 26.3% (same root cause as the TSM display fix in commit 94400ee).
     sf_map = float(sf_results.get("a_mAP", 0.0)) * 100.0
 
-    # evaluate: two-stage pipeline
-    print("Running two-stage pipeline evaluation...")
+    # Build the TSM coarse model once: we reuse it for (a) TSM single-stage
+    # evaluation below and (b) the two-stage pipeline after that, so loading
+    # the checkpoint twice is wasted I/O.
     coarse = TSMSpottingHead(
         feat_dim=args.feat_dim, num_classes=17,
         hidden_dim=PIPELINE_CONFIG["coarse_hidden_dim"],
     ).to(args.device)
     load_checkpoint(args.coarse_checkpoint, coarse)
 
-    pipeline = TwoStagePipeline(coarse, model, PIPELINE_CONFIG, device=args.device)
+    # evaluate: TSM single-stage (previously displayed as N/A). Reuses the
+    # coarse checkpoint already loaded above; uses TSM_CONFIG sliding-window
+    # + NMS params so the number is comparable to a standalone TSM training
+    # run. Framerate/scale come from the same feature-type-aware source as
+    # SlowFast single-stage to avoid the 2fps-vs-1fps position-halving bug
+    # that two-stage used to hit on Baidu (feature_type=baidu is 1fps).
+    print("\nGenerating TSM single-stage predictions...")
+    tsm_pred_dir = os.path.join(args.output_dir, "predictions_tsm")
+    generate_predictions(
+        model=coarse, match_dirs=val_dirs, match_ids=val_ids,
+        output_dir=tsm_pred_dir, device=args.device,
+        feature_files=(f1_name, f2_name),
+        window_size=TSM_CONFIG["window_size"], stride=TSM_CONFIG["stride"],
+        nms_window=TSM_CONFIG["nms_window"],
+        confidence_threshold=TSM_CONFIG["confidence_threshold"],
+        feature_scale=_scale, framerate=_framerate,
+    )
+    tsm_results = run_evaluation(args.data_dir, tsm_pred_dir, split=val_split_name)
+    tsm_map = float(tsm_results.get("a_mAP", 0.0)) * 100.0
+
+    # evaluate: two-stage pipeline
+    print("Running two-stage pipeline evaluation...")
+    # framerate is keyword-only on TwoStagePipeline so a 1fps feature set
+    # (Baidu) cannot accidentally inherit the 2fps PCA assumption. Choosing
+    # the wrong rate halved every prediction position on Baidu and collapsed
+    # tight-mAP to ~1% before the parameter was made mandatory.
+    pipeline = TwoStagePipeline(coarse, model, PIPELINE_CONFIG,
+                                framerate=_framerate, device=args.device)
 
     # generate two-stage predictions
     from src.models.temporal.postprocess import save_predictions
@@ -190,28 +236,39 @@ def main():
         preds = pipeline.run(torch.FloatTensor(h1), torch.FloatTensor(h2))
         out_path = os.path.join(ts_pred_dir, match_id)
         os.makedirs(out_path, exist_ok=True)
-        save_predictions(preds, os.path.join(out_path, "results_spotting.json"))
+        save_predictions(preds, os.path.join(out_path, "results_spotting.json"),
+                         url_local=match_id)
 
     ts_results = run_evaluation(args.data_dir, ts_pred_dir, split=val_split_name)
     ts_map = float(ts_results.get("a_mAP", 0.0)) * 100.0
 
-    # benchmark latency
+    # benchmark latency — framerate is required so the internal
+    # TwoStagePipeline instantiation can't silently fall back to 2fps on
+    # Baidu features.
     print("Benchmarking latency...")
     bench_features = torch.randn(1000, args.feat_dim)
     bench = benchmark_pipeline(coarse, model, bench_features, PIPELINE_CONFIG,
-                               device=args.device, num_runs=5, warmup=2)
+                               framerate=_framerate, device=args.device,
+                               num_runs=5, warmup=2)
+
+    # Measure SlowFast latency directly (previously the table showed a
+    # tsm_ms * 1.5 placeholder). Using benchmark_latency gives a real
+    # ms/frame number comparable to TSM's.
+    sf_bench = benchmark_latency(model, bench_features, device=args.device,
+                                 num_runs=5, warmup=2)
 
     # print results table
     print(f"\n{'Mode':<15} {'avg-mAP tight':>14} {'ms/frame':>10} {'Speedup':>9}")
     print("-" * 50)
     tsm_ms = bench["single_stage_ms"] / 1000
-    sf_ms = tsm_ms * 1.5  # rough estimate for SlowFast
+    sf_ms = sf_bench["mean_ms_per_frame"]
     ts_ms = bench["two_stage_ms"] / 1000
-    print(f"{'TSM single':<15} {'N/A':>14} {tsm_ms:>9.2f}ms {'1.0x':>9}")
+    print(f"{'TSM single':<15} {tsm_map:>13.1f}% {tsm_ms:>9.2f}ms {'1.0x':>9}")
     print(f"{'SlowFast':<15} {sf_map:>13.1f}% {sf_ms:>9.2f}ms {'--':>9}")
     print(f"{'Two-stage':<15} {ts_map:>13.1f}% {ts_ms:>9.2f}ms {bench['speedup_factor']:>8.1f}x")
 
     wandb.log({
+        "eval/tsm_mAP": tsm_map,
         "eval/slowfast_mAP": sf_map,
         "eval/twostage_mAP": ts_map,
         "eval/speedup_factor": bench["speedup_factor"],
