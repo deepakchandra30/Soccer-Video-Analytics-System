@@ -120,6 +120,10 @@ def main():
     scales = tuple(tuple(int(x) for x in pair.split(":"))
                    for pair in args.scales.split(","))
 
+    # Framerate must match feature extraction rate (Baidu=1fps, PCA=2fps).
+    from src.training.train_tsm import FEATURE_FRAMERATE
+    _framerate = FEATURE_FRAMERATE.get(args.feature_type, 2)
+
     set_seeds(42)
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -176,7 +180,7 @@ def main():
                 scores,
                 nms_window=args.nms_window,
                 confidence_threshold=args.confidence_threshold,
-                framerate=TSM_CONFIG["framerate"],
+                framerate=_framerate,
                 half=half_idx,
                 nms_mode=args.nms_mode,
             )

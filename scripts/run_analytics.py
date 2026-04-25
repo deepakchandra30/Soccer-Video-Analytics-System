@@ -25,6 +25,15 @@ def main():
     parser.add_argument("--fps", type=float, default=25.0)
     args = parser.parse_args()
 
+    # Fail fast if the client asked for narration but forgot to export the key,
+    # rather than wasting minutes of analytics before the OpenAI client 401s.
+    if args.generate_narrative and not os.environ.get("OPENAI_API_KEY", "").strip():
+        sys.exit(
+            "ERROR: --generate-narrative requires OPENAI_API_KEY to be set.\n"
+            "  Run:  export OPENAI_API_KEY=sk-...\n"
+            "  Then re-run this command."
+        )
+
     os.makedirs(args.output_dir, exist_ok=True)
 
     # load inputs
