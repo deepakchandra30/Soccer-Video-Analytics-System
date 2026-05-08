@@ -1,0 +1,62 @@
+{
+  "device": "cuda",
+  "feature_type": "baidu",
+  "feat_dim": 8576,
+  "chunk_frames": 80,
+  "training": [
+    {
+      "stage": "TSM",
+      "run_id": "offline-run-20260422_121137-j0an2ta8",
+      "missing": true
+    },
+    {
+      "stage": "SlowFast",
+      "run_id": "offline-run-20260422_134250-omz9szht",
+      "missing": true
+    },
+    {
+      "stage": "NetVLAD",
+      "run_id": "offline-run-20260422_143242-vl8nuteg",
+      "missing": true
+    }
+  ],
+  "total_training_time_s": 0,
+  "total_training_time_min": 0.0,
+  "total_training_time_h": 0.0,
+  "inference_latency_ms_per_frame": {
+    "TSM": {
+      "mean_ms_per_frame": 0.06834192788600921,
+      "std_ms_per_frame": 0.0004929273012214869,
+      "p50_ms_per_frame": 0.06821720004081726,
+      "p95_ms_per_frame": 0.06972599744796754,
+      "n_params": 20887058,
+      "checkpoint": "outputs/tsm_baidu/best.pt",
+      "T_frames": 80,
+      "feat_dim": 8576
+    },
+    "SlowFast": {
+      "mean_ms_per_frame": 0.03136467200517654,
+      "std_ms_per_frame": 0.0015849837277302008,
+      "p50_ms_per_frame": 0.03044860064983368,
+      "p95_ms_per_frame": 0.034674019366502766,
+      "n_params": 4622610,
+      "checkpoint": "outputs/slowfast_baidu/best.pt",
+      "T_frames": 80,
+      "feat_dim": 8576
+    },
+    "NetVLAD": {
+      "mean_ms_per_frame": 0.03527254372835159,
+      "std_ms_per_frame": 7.465180311534361e-05,
+      "p50_ms_per_frame": 0.035254599153995515,
+      "p95_ms_per_frame": 0.035464799851179125,
+      "n_params": 13162034,
+      "checkpoint": "outputs/netvlad_baidu/best.pt",
+      "T_frames": 80,
+      "feat_dim": 8576
+    },
+    "ThreeWayEnsemble": {
+      "mean_ms_per_frame": 0.13497914361953733,
+      "note": "Sum of per-head latencies (heads run sequentially)"
+    }
+  }
+}

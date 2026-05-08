@@ -1,0 +1,67 @@
+{
+  "tag": "final_baidu",
+  "split": "test",
+  "predictions_dir": "outputs/final_baidu/predictions",
+  "tight": {
+    "avg_mAP_fraction": 0.6123388444063823,
+    "avg_mAP_pct": 61.23388444063823,
+    "per_tolerance_pct": {
+      "1": 39.46105660274429,
+      "2": 57.05028527147723,
+      "3": 64.36204377354902,
+      "4": 68.83249018242032,
+      "5": 69.92038046746846
+    },
+    "per_class_pct": {
+      "Penalty": 67.69713405830007,
+      "Kick-off": 60.562973105063264,
+      "Goal": 84.0231019529019,
+      "Substitution": 55.395678385355126,
+      "Offside": 56.5043224296752,
+      "Shots on target": 44.534366500741285,
+      "Shots off target": 54.67429723281023,
+      "Clearance": 59.15440019312692,
+      "Ball out of play": 78.2344362379582,
+      "Throw-in": 77.02621100415286,
+      "Foul": 73.61382049905048,
+      "Indirect free-kick": 50.77879558009235,
+      "Direct free-kick": 66.10468396448931,
+      "Corner": 81.63741074785077,
+      "Yellow card": 63.55035055459424,
+      "Red card": 37.5741523393326,
+      "Yellow->red card": 29.909900705355252
+    },
+    "visibility": {
+      "visible_avg_mAP_pct": 67.43575118852986,
+      "unshown_avg_mAP_pct": 33.586320649826156
+    }
+  },
+  "loose": {
+    "avg_mAP_fraction": 0.7549189926768723,
+    "avg_mAP_pct": 75.49189926768723,
+    "per_tolerance_pct": {},
+    "per_class_pct": {
+      "Penalty": 94.7368701679552,
+      "Kick-off": 85.2812439398909,
+      "Goal": 89.32429697129675,
+      "Substitution": 79.53555672815787,
+      "Offside": 70.54965820558931,
+      "Shots on target": 52.36536546280885,
+      "Shots off target": 60.66592958535026,
+      "Clearance": 79.5574582191705,
+      "Ball out of play": 87.65289054496506,
+      "Throw-in": 88.47231521553076,
+      "Foul": 84.12008431348225,
+      "Indirect free-kick": 72.85236396054245,
+      "Direct free-kick": 73.06963446764478,
+      "Corner": 89.44539510086334,
+      "Yellow card": 80.54478460233443,
+      "Red card": 45.649090525750864,
+      "Yellow->red card": 49.539349539349544
+    },
+    "visibility": {
+      "visible_avg_mAP_pct": 80.30122678902775,
+      "unshown_avg_mAP_pct": 50.32444977439551
+    }
+  }
+}

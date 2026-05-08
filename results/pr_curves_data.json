@@ -1,0 +1,97 @@
+{
+  "tolerance_s": 5.0,
+  "fps": 1,
+  "weights": {
+    "tsm": 0.1,
+    "sf": 0.6,
+    "nv": 0.3
+  },
+  "n_matches": 100,
+  "per_class": {
+    "Penalty": {
+      "ap": 0.5873632802838122,
+      "n_positives": 451,
+      "n_frames": 551053
+    },
+    "Kick-off": {
+      "ap": 0.5845747711900187,
+      "n_positives": 4663,
+      "n_frames": 551053
+    },
+    "Goal": {
+      "ap": 0.6871174841481973,
+      "n_positives": 3586,
+      "n_frames": 551053
+    },
+    "Substitution": {
+      "ap": 0.612915595348546,
+      "n_positives": 5969,
+      "n_frames": 551053
+    },
+    "Offside": {
+      "ap": 0.4445897452452144,
+      "n_positives": 4571,
+      "n_frames": 551053
+    },
+    "Shots on target": {
+      "ap": 0.25307684890791354,
+      "n_positives": 12569,
+      "n_frames": 551053
+    },
+    "Shots off target": {
+      "ap": 0.23853626582797563,
+      "n_positives": 11565,
+      "n_frames": 551053
+    },
+    "Clearance": {
+      "ap": 0.5357688592159173,
+      "n_positives": 17908,
+      "n_frames": 551053
+    },
+    "Ball out of play": {
+      "ap": 0.6415911211014259,
+      "n_positives": 70732,
+      "n_frames": 551053
+    },
+    "Throw-in": {
+      "ap": 0.6327579304155662,
+      "n_positives": 41510,
+      "n_frames": 551053
+    },
+    "Foul": {
+      "ap": 0.5231801414251491,
+      "n_positives": 26524,
+      "n_frames": 551053
+    },
+    "Indirect free-kick": {
+      "ap": 0.49467548747503515,
+      "n_positives": 25071,
+      "n_frames": 551053
+    },
+    "Direct free-kick": {
+      "ap": 0.369440487664613,
+      "n_positives": 4192,
+      "n_frames": 551053
+    },
+    "Corner": {
+      "ap": 0.7248900639678238,
+      "n_positives": 10979,
+      "n_frames": 551053
+    },
+    "Yellow card": {
+      "ap": 0.5243496148518517,
+      "n_positives": 4608,
+      "n_frames": 551053
+    },
+    "Red card": {
+      "ap": 0.18519190348746675,
+      "n_positives": 88,
+      "n_frames": 551053
+    },
+    "Yellow->red card": {
+      "ap": 0.27510179500678333,
+      "n_positives": 154,
+      "n_frames": 551053
+    }
+  }
+}
