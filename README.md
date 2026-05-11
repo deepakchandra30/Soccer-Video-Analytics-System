@@ -6,10 +6,10 @@ An end-to-end pipeline for soccer match analysis using temporal deep learning, c
 
 This system transforms raw match footage into structured analytics through four stages:
 
-1. **Temporal Action Recognition** — TSM and SlowFast models detect 17 event types (goals, fouls, cards, etc.) with per-frame scoring and NMS post-processing
-2. **Player Tracking** — YOLOv8 detection + ByteTrack multi-object tracking with camera cut handling and pitch coordinate projection via homography
-3. **Analytics & Narratives** — Event-player attribution, per-player heatmaps and screen-time stats, LLM-generated match reports with deterministic fact-checking
-4. **Interactive Dashboard** — React web UI with synchronized video playback, event timeline, player analytics panels, and D3.js pitch visualizations
+1. **Temporal Action Recognition** - TSM and SlowFast models detect 17 event types (goals, fouls, cards, etc.) with per-frame scoring and NMS post-processing
+2. **Player Tracking** - YOLOv8 detection + ByteTrack multi-object tracking with camera cut handling and pitch coordinate projection via homography
+3. **Analytics & Narratives** - Event-player attribution, per-player heatmaps and screen-time stats, LLM-generated match reports with deterministic fact-checking
+4. **Interactive Dashboard** - React web UI with synchronized video playback, event timeline, player analytics panels, and D3.js pitch visualizations
 
 ## Quick Start
 
@@ -38,17 +38,17 @@ the HuggingFace mirror because KAUST's official host has been unreachable since
 2026-04-19.
 
 ```bash
-# RECOMMENDED — Baidu 8576-dim features, via HuggingFace mirror.
+# RECOMMENDED - Baidu 8576-dim features, via HuggingFace mirror.
 # Headline 61.11% tight / 74.20% loose was produced on these features.
 # Set HF_TOKEN (free at huggingface.co/settings/tokens) for 10-20x throughput.
 export HF_TOKEN=<your_hf_read_token>
 python scripts/download_features_hf.py --local-dir data/ --splits train valid test
 
-# Alternative — PCA-512 (ResNet-152 projected to 512-dim, 2fps, ~3GB total).
+# Alternative - PCA-512 (ResNet-152 projected to 512-dim, 2fps, ~3GB total).
 # Faster to download, lower mAP ceiling (~42% tight). Good for smoke tests.
 python scripts/download_features.py --local-dir data/ --features pca512
 
-# Alternative — ResNet-152 raw 2048-dim (between the two above).
+# Alternative - ResNet-152 raw 2048-dim (between the two above).
 python scripts/download_features.py --local-dir data/ --features resnet50
 ```
 
@@ -66,7 +66,7 @@ locally without needing an API key. All scripts accept `--feature-type
 {pca512,resnet50,baidu}`; pass `baidu` to train on the 8576-dim features
 used for the headline.
 
-**Clean protocol (default, honest reporting)** — train on `train`,
+**Clean protocol (default, honest reporting)** - train on `train`,
 validate on `valid`, never touch `test` until the final ensemble eval.
 Pass `--seed` to enable multi-seed reliability runs.
 
@@ -92,7 +92,7 @@ python scripts/run_ablation.py --data-dir data/ --output-dir outputs/ablation \
   --checkpoints-dir outputs/ --experiments all
 ```
 
-**Legacy protocol (test-set leakage)** — only for reproducing the
+**Legacy protocol (test-set leakage)** - only for reproducing the
 previously-published 61.11% headline. Each command requires
 `--allow-test-leakage` and prints a banner.
 
@@ -108,13 +108,13 @@ The project ships **two evaluation protocols** so the bias from test-set
 tuning is explicit (the supervisor's 2026-04-30 review flagged the earlier
 protocol):
 
-- **Clean held-out (default for honest reporting)** — train on `train`,
+- **Clean held-out (default for honest reporting)** - train on `train`,
   tune on `valid`, test once on `test`, multi-seed with mean ± std and
   bootstrap 95% CI. Run with
   `python scripts/run_multi_seed.py --feature-type baidu` (default 3
   seeds, ~3-4× legacy compute). Aggregated numbers in
   `results/clean_protocol/multi_seed_summary.{json,md}`.
-- **Legacy test-tuned (kept only for reproducing the old number)** —
+- **Legacy test-tuned (kept only for reproducing the old number)** -
   train on `train+valid` merged, early-stop / ensemble-select on `test`.
   This produced **61.11% tight / 74.20% loose**
   (`results/metrics_final_baidu.json`). It can be reproduced with
@@ -127,7 +127,7 @@ neutralizes them. The side-by-side comparison is regenerated with
 `python scripts/generate_protocol_comparison.py` and lives at
 `results/PROTOCOL_COMPARISON.md`.
 
-**Fast path — download our pretrained checkpoints (recommended, ≈3 min):**
+**Fast path - download our pretrained checkpoints (recommended, ≈3 min):**
 
 ```bash
 python scripts/download_pretrained.py    # 464 MB from a private GitHub Release
@@ -141,7 +141,7 @@ cloned via `gh repo clone` or `git clone` with a credential helper). The
 download is sha256-verified against `results/checkpoints_manifest.json` so
 silent corruption can't occur.
 
-**Slow path — train from scratch (4-12 h on a single 24 GB GPU):**
+**Slow path - train from scratch (4-12 h on a single 24 GB GPU):**
 
 ```bash
 # Honest reporting: clean held-out with N seeds (mean ± std + 95% CI):
@@ -156,7 +156,7 @@ predictions in `outputs/final_baidu/predictions/`. Each training stage is
 skipped if its `best.pt` already exists, so re-runs after tuning ensemble
 knobs do not retrain from scratch. Note: training is non-deterministic on
 GPU (CUDA + DataLoader workers), so a freshly-trained run may land in the
-54-58% range rather than exactly 61.11% — the fast path above bypasses
+54-58% range rather than exactly 61.11% - the fast path above bypasses
 this variance entirely.
 
 For the earlier PCA-512 result (42.37% tight, TSM+SlowFast only, faster to
