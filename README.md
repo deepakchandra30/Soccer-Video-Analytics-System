@@ -60,18 +60,18 @@ All training scripts accept `--feature-type {pca512,resnet152,baidu}`. Use `baid
 
 ```bash
 # TSM on Baidu features
-WANDB_MODE=offline python -m src.training.train_tsm \
+python -m src.training.train_tsm \
   --data-dir data/ --output-dir outputs/tsm_baidu \
   --feature-type baidu --seed 42
 
 # SlowFast (two-stage; uses TSM checkpoint)
-WANDB_MODE=offline python -m src.training.train_slowfast \
+python -m src.training.train_slowfast \
   --data-dir data/ --output-dir outputs/slowfast_baidu \
   --coarse-checkpoint outputs/tsm_baidu/best.pt \
   --feature-type baidu --seed 42
 
 # NetVLAD++ (third ensemble member)
-WANDB_MODE=offline python -m src.training.train_netvlad \
+python -m src.training.train_netvlad \
   --data-dir data/ --output-dir outputs/netvlad_baidu \
   --feature-type baidu --seed 42
 ```
